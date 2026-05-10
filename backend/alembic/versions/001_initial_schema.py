@@ -220,6 +220,7 @@ def upgrade() -> None:
     op.create_index('ix_ajo_membership_ajo_id', 'ajo_membership', ['ajo_id'])
     op.create_index('ix_ajo_membership_user_id', 'ajo_membership', ['user_id'])
     
+    
     # 11. Referral table
     op.create_table(
         'referral',
