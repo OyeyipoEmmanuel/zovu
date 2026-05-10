@@ -113,15 +113,24 @@ def create_app() -> FastAPI:
             "environment": settings.ENVIRONMENT,
         }
     
-    # Include routers (will add once they're created)
-    # from src.routers import auth, loans, credit, transactions, ajo, referral, webhooks
-    # app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
-    # app.include_router(loans.router, prefix="/api/v1/loans", tags=["Loans"])
-    # app.include_router(credit.router, prefix="/api/v1/credit", tags=["Credit"])
-    # app.include_router(transactions.router, prefix="/api/v1/transactions", tags=["Transactions"])
-    # app.include_router(ajo.router, prefix="/api/v1/ajo", tags=["Ajo"])
-    # app.include_router(referral.router, prefix="/api/v1/referral", tags=["Referral"])
-    # app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["Webhooks"])
+    # Include routers
+    from src.routers import (
+        auth_router,
+        credit_router,
+        loans_router,
+        transactions_router,
+        ajo_router,
+        referral_router,
+        webhooks_router,
+    )
+    
+    app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
+    app.include_router(credit_router, prefix="/api/v1/credit", tags=["Credit"])
+    app.include_router(loans_router, prefix="/api/v1/loans", tags=["Loans"])
+    app.include_router(transactions_router, prefix="/api/v1/transactions", tags=["Transactions"])
+    app.include_router(ajo_router, prefix="/api/v1/ajo", tags=["Ajo"])
+    app.include_router(referral_router, prefix="/api/v1/referral", tags=["Referral"])
+    app.include_router(webhooks_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
     
     logger.info("application_created", routes=len(app.routes))
     return app
