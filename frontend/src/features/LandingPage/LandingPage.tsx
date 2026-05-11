@@ -25,7 +25,7 @@ export const LandingPage: React.FC = () => {
           <Link to="/login">
             <Button variant="secondary" className="hidden sm:flex">Log In</Button>
           </Link>
-          <Link to="/signup">
+          <Link to="/signup/personal-info">
               <Button variant="primary">Open Account</Button>
           </Link>
         </div>
@@ -44,7 +44,7 @@ export const LandingPage: React.FC = () => {
           </p>
 
           <div className="">
-            <Link to="/signup"><Button variant="primary" className="text-[16px] w-full md:w-[50%] px-8">Get Started</Button></Link>
+            <Link to="/signup/personal-info"><Button variant="primary" className="text-[16px] w-full md:w-[50%] px-8">Get Started</Button></Link>
           </div>
 
         </div>

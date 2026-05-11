@@ -1,14 +1,18 @@
 """
 FastAPI application factory with lifespan context manager.
 """
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from src.config import settings
 from src.core.database import init_db, close_db
 from src.core.redis_client import close_redis
 from src.core.middleware import add_middleware
+# pyrefly: ignore [missing-import]
 import structlog
+# pyrefly: ignore [missing-import]
 import sentry_sdk
+# pyrefly: ignore [missing-import]
 from prometheus_fastapi_instrumentator import Instrumentator
 
 logger = structlog.get_logger()
@@ -143,6 +147,7 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    # pyrefly: ignore [missing-import]
     import uvicorn
     
     uvicorn.run(
