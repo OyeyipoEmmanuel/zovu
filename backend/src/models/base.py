@@ -7,7 +7,7 @@ from sqlalchemy import (
     String, Integer, Float, Boolean, DateTime, Text, JSON, Enum as SQLEnum,
     ForeignKey, UniqueConstraint, Index, CheckConstraint, LargeBinary
 )
-from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from datetime import datetime, timezone
@@ -81,7 +81,7 @@ class User(Base):
     
     # Compliance
     kyc_verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    compliance_flags: Mapped[list | None] = mapped_column(JSONB)  # Array of compliance issues
+    compliance_flags: Mapped[list | None] = mapped_column(JSON)  # Array of compliance issues
     
     # Pulse Score (aggregate from signals)
     pulse_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # 0-850
@@ -97,7 +97,8 @@ class User(Base):
     # Relationships
     credits = relationship("Credit", back_populates="user", cascade="all, delete-orphan")
     loans = relationship("Loan", back_populates="user", cascade="all, delete-orphan")
-    transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
+    sent_transactions = relationship("Transaction", foreign_keys="Transaction.sender_id", back_populates="sender")
+    received_transactions = relationship("Transaction", foreign_keys="Transaction.receiver_id", back_populates="receiver")
     referrals_given = relationship("Referral", foreign_keys="Referral.referrer_id", back_populates="referrer")
     referrals_received = relationship("Referral", foreign_keys="Referral.referred_id", back_populates="referred_user")
     devices = relationship("Device", back_populates="user", cascade="all, delete-orphan")
@@ -228,25 +229,33 @@ class Loan(Base):
 
 
 class Transaction(Base):
-    """Transaction ledger — all money movements."""
+    """Transaction ledger — all money movements.
+    
+    sender_id: the user initiating/paying (NULL when money comes from an external source or system).
+    receiver_id: the user receiving funds (NULL when money goes to an external destination or system).
+    At least one of sender_id / receiver_id must reference a User row.
+    """
     __tablename__ = "transactions"
     
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
+    sender_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    receiver_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     loan_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("loans.id", ondelete="SET NULL"))
     transaction_type: Mapped[TransactionType] = mapped_column(SQLEnum(TransactionType))
     amount: Mapped[int] = mapped_column(Integer)  # KOBO
     squad_reference: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50))  # pending | completed | failed
-    metadata: Mapped[dict | None] = mapped_column(JSONB)
+    tx_metadata: Mapped[dict | None] = mapped_column(JSON, name='metadata')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
-    user = relationship("User", back_populates="transactions")
+    sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_transactions")
+    receiver = relationship("User", foreign_keys=[receiver_id], back_populates="received_transactions")
     loan = relationship("Loan", back_populates="transactions")
     
     __table_args__ = (
-        Index("ix_transactions_user_id", "user_id"),
+        Index("ix_transactions_sender_id", "sender_id"),
+        Index("ix_transactions_receiver_id", "receiver_id"),
         Index("ix_transactions_created_at", "created_at"),
         Index("ix_transactions_squad_reference", "squad_reference"),
     )
@@ -288,7 +297,7 @@ class Ajo(Base):
     total_balance: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # KOBO
     max_members: Mapped[int] = mapped_column(Integer)
     status: Mapped[AjoStatus] = mapped_column(SQLEnum(AjoStatus), default=AjoStatus.ACTIVE)
-    payout_schedule: Mapped[list | None] = mapped_column(JSONB)  # Array of member order
+    payout_schedule: Mapped[list | None] = mapped_column(JSON)  # Array of member order
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -376,7 +385,7 @@ class SquadWebhookLog(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     webhook_id: Mapped[str] = mapped_column(String(100), unique=True)  # From Squad
     event_type: Mapped[str] = mapped_column(String(100))
-    payload: Mapped[dict] = mapped_column(JSONB)
+    payload: Mapped[dict] = mapped_column(JSON)
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     
