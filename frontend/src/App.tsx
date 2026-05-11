@@ -1,22 +1,22 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LandingPage } from './features/LandingPage';
 import {
   Login,
-  PersonalInfo,
-  RoleInfo,
-  IdentityVerification,
-  FinancialProfile,
-  SignupSuccess,
+  Signup,
 } from './features/Auth';
-
-const DashboardPlaceholder = () => (
-  <div style={{ padding: 40, fontFamily: 'sans-serif' }}>
-    <h1>Dashboard — coming soon</h1>
-    <p>You are logged in. Dashboard UI is under construction.</p>
-    <a href="/login">Log out</a>
-  </div>
-);
+import {
+  TraderLayout,
+  DashboardHome,
+  Transactions,
+  PulseScore,
+  PostGig,
+  Payments,
+  Settings,
+  CompleteProfileLayout,
+  Step1KYC,
+  Step2Business,
+  Step3Success,
+} from './features/trader';
 
 function App() {
   return (
@@ -24,12 +24,25 @@ function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/signup/personal-info" element={<PersonalInfo />} />
-        <Route path="/signup/role-info" element={<RoleInfo />} />
-        <Route path="/signup/identity-verification" element={<IdentityVerification />} />
-        <Route path="/signup/financial-profile" element={<FinancialProfile />} />
-        <Route path="/signup/success" element={<SignupSuccess />} />
-        <Route path="/dashboard" element={<DashboardPlaceholder />} />
+        <Route path="/signup" element={<Signup />} />
+
+        {/* Trader Dashboard */}
+        <Route path="/dashboard/trader" element={<TraderLayout />}>
+          <Route index element={<DashboardHome />} />
+          <Route path="transactions" element={<Transactions />} />
+          <Route path="pulse" element={<PulseScore />} />
+          <Route path="gig/post" element={<PostGig />} />
+          <Route path="payments" element={<Payments />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="complete-profile" element={<CompleteProfileLayout />}>
+            <Route path="kyc" element={<Step1KYC />} />
+            <Route path="business" element={<Step2Business />} />
+            <Route path="success" element={<Step3Success />} />
+          </Route>
+        </Route>
+
+        {/* Redirect /dashboard to trader dashboard */}
+        <Route path="/dashboard" element={<Navigate to="/dashboard/trader" replace />} />
       </Routes>
     </BrowserRouter>
   );
