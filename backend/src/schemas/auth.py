@@ -3,7 +3,8 @@ Pydantic v2 Request/Response schemas.
 CRITICAL: Never expose ORM models directly — always use separate schemas.
 All monetary amounts are in KOBO (integers).
 """
-from pydantic import BaseModel, Field, EmailStr, validator
+# pyrefly: ignore [missing-import]
+from pydantic import BaseModel, Field, EmailStr
 from datetime import datetime
 from typing import Optional, List
 from enum import Enum

@@ -3,12 +3,16 @@ SQLAlchemy ORM models with async support.
 All models use UUID primary keys and include proper indexes.
 Money amounts are ALWAYS stored in KOBO (integer) — never floats.
 """
+# pyrefly: ignore [missing-import]
 from sqlalchemy import (
     String, Integer, Float, Boolean, DateTime, Text, JSON, Enum as SQLEnum,
     ForeignKey, UniqueConstraint, Index, CheckConstraint, LargeBinary
 )
+# pyrefly: ignore [missing-import]
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
+# pyrefly: ignore [missing-import]
 from sqlalchemy.sql import func
 from datetime import datetime, timezone
 from enum import Enum
