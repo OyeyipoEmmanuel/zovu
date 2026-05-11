@@ -4,7 +4,7 @@ CRITICAL: Never expose ORM models directly — always use separate schemas.
 All monetary amounts are in KOBO (integers).
 """
 # pyrefly: ignore [missing-import]
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 from datetime import datetime
 from typing import Optional, List, Literal
 from enum import Enum
@@ -87,13 +87,11 @@ class UserKYCSchema(BaseModel):
     bvn: Optional[str] = Field(None, min_length=11, max_length=11)
     nin: Optional[str] = Field(None, min_length=11, max_length=11)
 
-# Use @field_validator instead of @validator
-    @field_validator('nin')
-    @classmethod
-    def at_least_one_id(cls, v, values):
-        if not v and not values.get('bvn'):
+    @model_validator(mode='after')
+    def at_least_one_id(self):
+        if not self.bvn and not self.nin:
             raise ValueError('At least one of bvn or nin is required')
-        return v
+        return self
 
     class Config:
         json_schema_extra = {
@@ -157,7 +155,7 @@ class CreditResponseSchema(BaseModel):
 class LoanRequestSchema(BaseModel):
     """Request a loan."""
     principal_amount: int = Field(..., gt=0)  # KOBO
-    tenure_days: Literal[7, 14, 30, 60] # This enforces the choices automatically
+    tenure_days: Literal[7, 14, 30, 60]
 
 
 class LoanResponseSchema(BaseModel):
@@ -328,9 +326,8 @@ class ErrorSchema(BaseModel):
             "example": {"detail": "Invalid request"}
         }
 
-# NEW AUTH SCHEMAS
 
-# Trader Onboarding Schema
+# ============== ONBOARDING SCHEMAS ==============
 class TraderOnboardingSchema(BaseModel):
     business_name: str = Field(..., min_length=2)
     business_type: str
@@ -339,7 +336,6 @@ class TraderOnboardingSchema(BaseModel):
     primary_language: str
 
 
-# Seeker Onboarding Schema
 class SeekerOnboardingSchema(BaseModel):
     skills_list: List[str]
     languages_spoken: List[str]
@@ -347,7 +343,7 @@ class SeekerOnboardingSchema(BaseModel):
     primary_language: str
 
 
-# Gig Creation Schema
+# ============== GIG SCHEMAS ==============
 class GigCreationSchema(BaseModel):
     title: str
     description: Optional[str] = None
@@ -356,7 +352,6 @@ class GigCreationSchema(BaseModel):
     amount: int = Field(..., gt=0)
 
 
-# Gig Response Schema
 class GigResponseSchema(BaseModel):
     id: str
     trader_id: str
@@ -375,7 +370,7 @@ class GigResponseSchema(BaseModel):
         from_attributes = True
 
 
-# reputation schema 
+# ============== REPUTATION SCHEMAS ==============
 class ReputationSchema(BaseModel):
     trust_score: float
     punctuality_index: float
