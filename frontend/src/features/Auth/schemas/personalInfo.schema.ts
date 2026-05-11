@@ -46,10 +46,20 @@ export const personalInfoSchema = z.object({
     .min(1, 'Date of birth is required')
     .refine((val) => {
       const dob = new Date(val);
+      return !isNaN(dob.getTime());
+    }, 'Please enter a valid date')
+    .refine((val) => {
+      const dob = new Date(val);
       const today = new Date();
-      const age = today.getFullYear() - dob.getFullYear();
-      return age >= 18;
-    }, 'You must be at least 18 years old'),
+      const eighteenYearsAgo = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+      return dob <= eighteenYearsAgo;
+    }, 'You must be at least 18 years old')
+    .refine((val) => {
+      const dob = new Date(val);
+      const today = new Date();
+      const hundredYearsAgo = new Date(today.getFullYear() - 100, today.getMonth(), today.getDate());
+      return dob >= hundredYearsAgo;
+    }, 'Please enter a valid date of birth'),
 
   gender: z
     .string()

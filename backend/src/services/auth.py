@@ -29,6 +29,11 @@ import hashlib
 logger = structlog.get_logger()
 
 
+def _utcnow() -> datetime:
+    """Naive UTC datetime — SQLite stores datetimes without timezone info."""
+    return datetime.utcnow()
+
+
 class AuthService:
     """Authentication service with OTP, registration, login, token rotation."""
     
@@ -72,7 +77,7 @@ class AuthService:
         await self.db.commit()
         
         # Create new OTP
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        expires_at = _utcnow() + timedelta(minutes=10)
         
         if existing_user:
             otp = OTP(
@@ -161,7 +166,7 @@ class AuthService:
             raise ValidationError("No OTP found")
         
         # Check expiry
-        if otp_record.expires_at < datetime.now(timezone.utc):
+        if otp_record.expires_at < _utcnow():
             logger.warning("otp_expired", email=email)
             await self.db.delete(otp_record)
             await self.db.commit()
@@ -186,7 +191,7 @@ class AuthService:
         user.password_hash = hash_password(password)
         user.status = UserStatus.ACTIVE
         otp_record.used = True
-        otp_record.used_at = datetime.now(timezone.utc)
+        otp_record.used_at = _utcnow()
         
         await self.db.commit()
         logger.info("user_registered", user_id=user.id, email=email)
@@ -284,7 +289,7 @@ class AuthService:
             raise AuthenticationError("Refresh token revoked")
         
         # Check expiry
-        if refresh_token_record.expires_at < datetime.now(timezone.utc):
+        if refresh_token_record.expires_at < _utcnow():
             logger.warning("refresh_token_expired", user_id=user_id)
             raise AuthenticationError("Refresh token expired")
         
@@ -375,12 +380,12 @@ class AuthService:
         
         # Create refresh token (also JWT but with longer TTL)
         from src.core.security import jwt as jose_jwt
-        refresh_exp = datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TTL_DAYS)
+        refresh_exp = _utcnow() + timedelta(days=settings.JWT_REFRESH_TTL_DAYS)
         refresh_payload = {
             "sub": user_id,
             "jti": refresh_jti,
             "exp": refresh_exp,
-            "iat": datetime.now(timezone.utc),
+            "iat": _utcnow(),
         }
         refresh_token = jose_jwt.encode(
             refresh_payload,

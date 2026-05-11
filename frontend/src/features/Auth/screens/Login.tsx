@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
@@ -10,9 +10,12 @@ import {
   SubmitButton,
 } from '../components';
 import { loginSchema, type LoginFormData } from '../schemas';
+import { login, saveTokens } from '../../../services/authService';
+import { ApiError } from '../../../services/api';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
+  const [apiError, setApiError] = useState('');
 
   const {
     register,
@@ -27,12 +30,18 @@ export const Login: React.FC = () => {
   });
 
   const onSubmit = async (data: LoginFormData): Promise<void> => {
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    // In production, call auth service
-    sessionStorage.setItem('zovu_auth', JSON.stringify({ email: data.email, authenticated: true }));
-    navigate('/dashboard');
+    setApiError('');
+    try {
+      const tokens = await login(data.email, data.password);
+      saveTokens(tokens);
+      navigate('/dashboard');
+    } catch (e: unknown) {
+      setApiError(
+        e instanceof ApiError
+          ? e.message
+          : 'Login failed. Please check your credentials.',
+      );
+    }
   };
 
   return (
@@ -71,6 +80,12 @@ export const Login: React.FC = () => {
             Forgot password?
           </button>
         </div>
+
+        {apiError && (
+          <p className="font-dm text-[13px] text-red-400 text-center -mb-1" role="alert">
+            {apiError}
+          </p>
+        )}
 
         <SubmitButton loading={isSubmitting}>Log In</SubmitButton>
 

@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
+import { submitKyc } from '../../../services/authService';
+import { ApiError } from '../../../services/api';
 import {
   AuthLayout,
   FormField,
@@ -21,6 +23,7 @@ import {
 
 export const FinancialProfile: React.FC = () => {
   const navigate = useNavigate();
+  const [apiError, setApiError] = useState('');
 
   const {
     register,
@@ -41,26 +44,35 @@ export const FinancialProfile: React.FC = () => {
   });
 
   const onSubmit = async (data: FinancialProfileFormData): Promise<void> => {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    setApiError('');
+    try {
+      const personalRaw = sessionStorage.getItem('zovu_personal');
+      const identityRaw = sessionStorage.getItem('zovu_identity');
+      const personal = personalRaw ? JSON.parse(personalRaw) as Record<string, string> : {};
+      const identity = identityRaw ? JSON.parse(identityRaw) as Record<string, string> : {};
 
-    // Combine all step data and submit (in production, send to backend)
-    const personalData = sessionStorage.getItem('zovu_personal');
-    const roleData = sessionStorage.getItem('zovu_role');
-    const identityData = sessionStorage.getItem('zovu_identity');
-    const combinedData = {
-      personal: personalData ? JSON.parse(personalData) : null,
-      role: roleData ? JSON.parse(roleData) : null,
-      identity: identityData ? JSON.parse(identityData) : null,
-      financial: data,
-    };
+      await submitKyc({
+        first_name: personal.firstName ?? '',
+        last_name: personal.lastName ?? '',
+        date_of_birth: personal.dateOfBirth
+          ? new Date(personal.dateOfBirth).toISOString()
+          : '',
+        phone: personal.phoneNumber ?? '',
+        ...(identity.idType === 'bvn' ? { bvn: identity.idNumber } : {}),
+        ...(identity.idType === 'nin' ? { nin: identity.idNumber } : {}),
+      });
 
-    // Simulate storing the registration
-    sessionStorage.setItem('zovu_registration', JSON.stringify(combinedData));
-    sessionStorage.removeItem('zovu_personal');
-    sessionStorage.removeItem('zovu_role');
-    sessionStorage.removeItem('zovu_identity');
+      sessionStorage.setItem('zovu_registration', JSON.stringify({ personal, identity, financial: data }));
+      sessionStorage.removeItem('zovu_personal');
+      sessionStorage.removeItem('zovu_role');
+      sessionStorage.removeItem('zovu_identity');
 
-    navigate('/signup/success');
+      navigate('/signup/success');
+    } catch (e: unknown) {
+      setApiError(
+        e instanceof ApiError ? e.message : 'Registration failed. Please try again.',
+      );
+    }
   };
 
   return (
@@ -183,6 +195,12 @@ export const FinancialProfile: React.FC = () => {
           <span className="font-dm text-[12px] text-red-400 leading-[1.2] -mt-3" role="alert">
             {errors.agreedToTerms.message}
           </span>
+        )}
+
+        {apiError && (
+          <p className="font-dm text-[13px] text-red-400 text-center" role="alert">
+            {apiError}
+          </p>
         )}
 
         <div className="flex flex-col sm:flex-row gap-3 mt-2">

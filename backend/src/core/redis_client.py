@@ -50,6 +50,11 @@ async def get_redis_blacklist() -> Redis:
     return await redis_client.get_pool(1)
 
 
+async def get_redis_blacklist_dep() -> Redis:
+    """FastAPI dependency alias for get_redis_blacklist."""
+    return await redis_client.get_pool(1)
+
+
 async def get_redis_sessions() -> Redis:
     """Get sessions/device fingerprint Redis pool (db=3)."""
     return await redis_client.get_pool(3)

@@ -217,8 +217,8 @@ async def submit_kyc(
         
         # Encrypt PII fields
         phone_encrypted = encrypt_pii(req.phone)
-        bvn_encrypted = encrypt_pii(req.bvn)
-        nin_encrypted = encrypt_pii(req.nin)
+        bvn_encrypted = encrypt_pii(req.bvn) if req.bvn else None
+        nin_encrypted = encrypt_pii(req.nin) if req.nin else None
         
         # Update user
         user.first_name = req.first_name

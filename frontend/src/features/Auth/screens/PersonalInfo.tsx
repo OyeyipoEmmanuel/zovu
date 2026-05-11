@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
+import { requestOtp, verifyOtp, saveTokens } from '../../../services/authService';
+import { ApiError } from '../../../services/api';
 import {
   AuthLayout,
   FormField,
@@ -16,8 +18,20 @@ import {
   GENDER_OPTIONS,
 } from '../schemas';
 
+const today = new Date();
+const maxDob = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate())
+  .toISOString().split('T')[0];
+const minDob = new Date(today.getFullYear() - 100, today.getMonth(), today.getDate())
+  .toISOString().split('T')[0];
+
 export const PersonalInfo: React.FC = () => {
   const navigate = useNavigate();
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [apiError, setApiError] = useState('');
+  const [savedFormData, setSavedFormData] = useState<PersonalInfoFormData | null>(null);
 
   const {
     register,
@@ -39,10 +53,96 @@ export const PersonalInfo: React.FC = () => {
   });
 
   const onSubmit = async (data: PersonalInfoFormData): Promise<void> => {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    sessionStorage.setItem('zovu_personal', JSON.stringify(data));
-    navigate('/signup/role-info');
+    setApiError('');
+    try {
+      sessionStorage.setItem('zovu_personal', JSON.stringify(data));
+      const res = await requestOtp(data.email);
+      setSavedFormData(data);
+      if (res.otp) {
+        setDevOtp(res.otp);
+        setOtpCode(res.otp);
+      }
+      setOtpSent(true);
+    } catch (e: unknown) {
+      setApiError(
+        e instanceof ApiError ? e.message : 'Failed to send OTP. Please try again.',
+      );
+    }
   };
+
+  const handleOtpVerify = async (): Promise<void> => {
+    if (!savedFormData || otpCode.length < 6) return;
+    setIsVerifying(true);
+    setApiError('');
+    try {
+      const tokens = await verifyOtp(savedFormData.email, otpCode, savedFormData.password);
+      saveTokens(tokens);
+      navigate('/signup/role-info');
+    } catch (e: unknown) {
+      setApiError(
+        e instanceof ApiError ? e.message : 'Verification failed. Check your code and try again.',
+      );
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  if (otpSent) {
+    return (
+      <AuthLayout
+        title="Verify Your Email"
+        subtitle={`A 6-digit code was sent to ${savedFormData?.email ?? 'your email'}. Enter it below to continue.`}
+        step={{ current: 1, total: 5, label: 'Personal Information' }}
+      >
+        <form
+          onSubmit={(e) => { e.preventDefault(); void handleOtpVerify(); }}
+          className="flex flex-col gap-5"
+          noValidate
+        >
+          {devOtp && (
+            <div className="flex items-center gap-3 bg-zovu-amber/10 border border-zovu-amber/40 rounded-[8px] px-4 py-3">
+              <span className="text-zovu-amber text-[11px] font-dm font-semibold uppercase tracking-wider shrink-0">Dev</span>
+              <p className="font-dm text-[13px] text-zovu-text-light">
+                No email service configured — your code is{' '}
+                <span className="font-mono font-bold text-zovu-amber tracking-[0.2em]">{devOtp}</span>
+                {' '}(pre-filled below)
+              </p>
+            </div>
+          )}
+          <FormField label="One-Time Code" id="otpCode">
+            <input
+              id="otpCode"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="123456"
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+              className="w-full bg-transparent border border-zovu-border rounded-[8px] font-dm text-[14px] text-zovu-text-light px-4 py-3 outline-none focus:border-zovu-primary transition-colors duration-200 placeholder:text-zovu-text/50 tracking-[0.3em] text-center"
+            />
+          </FormField>
+
+          {apiError && (
+            <p className="font-dm text-[13px] text-red-400 text-center" role="alert">
+              {apiError}
+            </p>
+          )}
+
+          <SubmitButton loading={isVerifying} className="mt-2">
+            Verify &amp; Continue
+          </SubmitButton>
+
+          <button
+            type="button"
+            onClick={() => { setOtpSent(false); setApiError(''); setOtpCode(''); }}
+            className="font-dm text-[13px] text-zovu-primary hover:underline text-center transition-colors duration-200"
+          >
+            Resend code or change email
+          </button>
+        </form>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout
@@ -118,6 +218,8 @@ export const PersonalInfo: React.FC = () => {
             <TextInput
               id="dateOfBirth"
               type="date"
+              max={maxDob}
+              min={minDob}
               hasError={!!errors.dateOfBirth}
               {...register('dateOfBirth')}
             />
@@ -163,6 +265,12 @@ export const PersonalInfo: React.FC = () => {
             {...register('confirmPassword')}
           />
         </FormField>
+
+        {apiError && (
+          <p className="font-dm text-[13px] text-red-400 text-center -mb-1" role="alert">
+            {apiError}
+          </p>
+        )}
 
         <SubmitButton loading={isSubmitting} className="mt-2">
           Continue to Role Selection
