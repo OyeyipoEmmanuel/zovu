@@ -20,10 +20,10 @@ Base = declarative_base()
 
 
 # Enums
-class UserRole(str, Enum):
-    """User role enumeration."""
-    USER = "user"
-    ADMIN = "admin"
+class UserType(str, Enum):
+    TRADER = "trader"
+    SEEKER = "seeker"
+    BOTH = "both"
 
 
 class UserStatus(str, Enum):
@@ -115,7 +115,10 @@ class User(Base):
     phone: Mapped[bytes]  # Encrypted with Fernet
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(SQLEnum(UserRole), default=UserRole.USER)
+    user_type: Mapped[UserType] = mapped_column(
+        SQLEnum(UserType),
+        default=UserType.SEEKER
+    )
     status: Mapped[UserStatus] = mapped_column(SQLEnum(UserStatus), default=UserStatus.ACTIVE)
     
     # KYC fields (encrypted)
@@ -346,6 +349,11 @@ class Transaction(Base):
     transaction_type: Mapped[TransactionType] = mapped_column(SQLEnum(TransactionType))
     amount: Mapped[int] = mapped_column(Integer)  # KOBO
     squad_reference: Mapped[str | None] = mapped_column(String(100))
+
+    # is this compulsory 
+    direction: Mapped[str] = mapped_column(String(20))
+
+    method: Mapped[str | None] = mapped_column(String(50))
     status: Mapped[str] = mapped_column(String(50))  # pending | completed | failed
     tx_metadata: Mapped[dict | None] = mapped_column(JSON, name='metadata')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -448,6 +456,10 @@ class Gig(Base):
         server_default=func.now(),
         onupdate=func.now()
     )
+
+    accepted_at: Mapped[datetime | None]
+    completed_at: Mapped[datetime | None]
+    cancelled_at: Mapped[datetime | None]
 
     __table_args__ = (
         Index("ix_gigs_trader_id", "trader_id"),

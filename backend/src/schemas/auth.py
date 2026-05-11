@@ -212,20 +212,24 @@ class LoanCalculationResponseSchema(BaseModel):
 # ============== TRANSACTION SCHEMAS ==============
 class TransactionResponseSchema(BaseModel):
     """Transaction record."""
+
     id: str
     sender_id: Optional[str] = None
     receiver_id: Optional[str] = None
-    transaction_type: str
-    amount: int  # KOBO
-    status: str
-    squad_reference: Optional[str] = None
     loan_id: Optional[str] = None
+    transaction_type: str
+    direction: str
+    amount: int
+    method: Optional[str] = None
+    economic_context: Optional[str] = None
+    squad_reference: Optional[str] = None
+    status: str
     metadata: Optional[dict] = None
     created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
-
 
 class TransactionListSchema(BaseModel):
     """Paginated transaction list."""
