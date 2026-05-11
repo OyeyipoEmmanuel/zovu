@@ -1,8 +1,4 @@
 export {
-  PersonalInfo,
-  RoleInfo,
-  IdentityVerification,
-  FinancialProfile,
-  SignupSuccess,
+  Signup,
   Login,
 } from './screens';
