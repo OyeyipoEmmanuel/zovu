@@ -3,10 +3,9 @@ Pydantic v2 Request/Response schemas.
 CRITICAL: Never expose ORM models directly — always use separate schemas.
 All monetary amounts are in KOBO (integers).
 """
-# pyrefly: ignore [missing-import]
-from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, Field, EmailStr, validator
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import Optional, List
 from enum import Enum
 
 
@@ -87,11 +86,11 @@ class UserKYCSchema(BaseModel):
     bvn: Optional[str] = Field(None, min_length=11, max_length=11)
     nin: Optional[str] = Field(None, min_length=11, max_length=11)
 
-    @model_validator(mode='after')
-    def at_least_one_id(self):
-        if not self.bvn and not self.nin:
+    @validator('nin', always=True)
+    def at_least_one_id(cls, v, values):
+        if not v and not values.get('bvn'):
             raise ValueError('At least one of bvn or nin is required')
-        return self
+        return v
 
     class Config:
         json_schema_extra = {
@@ -155,7 +154,7 @@ class CreditResponseSchema(BaseModel):
 class LoanRequestSchema(BaseModel):
     """Request a loan."""
     principal_amount: int = Field(..., gt=0)  # KOBO
-    tenure_days: Literal[7, 14, 30, 60]
+    tenure_days: int = Field(..., choices=[7, 14, 30, 60])
 
 
 class LoanResponseSchema(BaseModel):
@@ -178,7 +177,7 @@ class LoanResponseSchema(BaseModel):
 class LoanCalculatorSchema(BaseModel):
     """Calculate loan terms (no database mutation)."""
     principal_amount: int = Field(..., gt=0)  # KOBO
-    tenure_days: Literal[7, 14, 30, 60]
+    tenure_days: int = Field(..., choices=[7, 14, 30, 60])
     
     class Config:
         json_schema_extra = {
@@ -325,53 +324,3 @@ class ErrorSchema(BaseModel):
         json_schema_extra = {
             "example": {"detail": "Invalid request"}
         }
-
-
-# ============== ONBOARDING SCHEMAS ==============
-class TraderOnboardingSchema(BaseModel):
-    business_name: str = Field(..., min_length=2)
-    business_type: str
-    work_needed_type: str
-    location: str
-    primary_language: str
-
-
-class SeekerOnboardingSchema(BaseModel):
-    skills_list: List[str]
-    languages_spoken: List[str]
-    location: str
-    primary_language: str
-
-
-# ============== GIG SCHEMAS ==============
-class GigCreationSchema(BaseModel):
-    title: str
-    description: Optional[str] = None
-    skill_required: str
-    location: str
-    amount: int = Field(..., gt=0)
-
-
-class GigResponseSchema(BaseModel):
-    id: str
-    trader_id: str
-    seeker_id: Optional[str] = None
-    title: str
-    description: Optional[str] = None
-    skill_required: str
-    location: str
-    amount: int
-    status: str
-    trader_rating: Optional[int] = None
-    seeker_rating: Optional[int] = None
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-# ============== REPUTATION SCHEMAS ==============
-class ReputationSchema(BaseModel):
-    trust_score: float
-    punctuality_index: float
-    completion_rate: float
