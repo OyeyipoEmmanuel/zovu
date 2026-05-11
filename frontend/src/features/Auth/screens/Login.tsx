@@ -119,9 +119,9 @@ export const Login: React.FC = () => {
         <p className="text-center font-dm text-[13px] text-zovu-text mt-1">
           Don't have an account?{' '}
           <a
-            href="/signup/identity-verification"
+            href="/signup"
             className="text-zovu-primary hover:underline font-medium transition-colors duration-200"
-            onClick={(e) => { e.preventDefault(); navigate('/signup/identity-verification'); }}
+            onClick={(e) => { e.preventDefault(); navigate('/signup'); }}
           >
             Sign up
           </a>
