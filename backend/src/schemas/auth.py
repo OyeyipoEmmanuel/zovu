@@ -327,3 +327,56 @@ class ErrorSchema(BaseModel):
         json_schema_extra = {
             "example": {"detail": "Invalid request"}
         }
+
+# NEW AUTH SCHEMAS
+
+# Trader Onboarding Schema
+class TraderOnboardingSchema(BaseModel):
+    business_name: str = Field(..., min_length=2)
+    business_type: str
+    work_needed_type: str
+    location: str
+    primary_language: str
+
+
+# Seeker Onboarding Schema
+class SeekerOnboardingSchema(BaseModel):
+    skills_list: List[str]
+    languages_spoken: List[str]
+    location: str
+    primary_language: str
+
+
+# Gig Creation Schema
+class GigCreationSchema(BaseModel):
+    title: str
+    description: Optional[str] = None
+    skill_required: str
+    location: str
+    amount: int = Field(..., gt=0)
+
+
+# Gig Response Schema
+class GigResponseSchema(BaseModel):
+    id: str
+    trader_id: str
+    seeker_id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    skill_required: str
+    location: str
+    amount: int
+    status: str
+    trader_rating: Optional[int] = None
+    seeker_rating: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# reputation schema 
+class ReputationSchema(BaseModel):
+    trust_score: float
+    punctuality_index: float
+    completion_rate: float
