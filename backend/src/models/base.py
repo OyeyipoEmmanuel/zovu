@@ -8,7 +8,10 @@ from sqlalchemy import (
     String, Integer, Float, Boolean, DateTime, Text, JSON, Enum as SQLEnum,
     ForeignKey, UniqueConstraint, Index, CheckConstraint, LargeBinary
 )
+
+# pyrefly: ignore [missing-import]
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 # pyrefly: ignore [missing-import]
 from sqlalchemy.sql import func

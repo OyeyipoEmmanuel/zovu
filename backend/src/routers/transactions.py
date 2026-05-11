@@ -1,14 +1,24 @@
 """
 Transactions router — list transactions with cursor-based pagination.
 """
-from fastapi import APIRouter, Depends, Query
+# pyrefly: ignore [missing-import]
+from fastapi import APIRouter, Depends, Query, HTTPException
+from backend.src.services.mock_data import get_mock_transactions
+# pyrefly: ignore [missing-import]
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+# pyrefly: ignore [missing-import]
+from sqlalchemy import select, desc, or_
+# pyrefly: ignore [missing-import]
 from src.core.database import get_db
+# pyrefly: ignore [missing-import]
 from src.dependencies import get_current_user
+# pyrefly: ignore [missing-import]
 from src.models import User, Transaction
+# pyrefly: ignore [missing-import]
 import structlog
+# pyrefly: ignore [missing-import]
 import base64
+# pyrefly: ignore [missing-import]
 import json
 
 logger = structlog.get_logger()
@@ -50,7 +60,6 @@ async def list_transactions(
             logger.warning("cursor_decode_failed", error=str(e))
     
     # Query transactions where user is sender or receiver
-    from sqlalchemy import or_
     query = select(Transaction).where(
         or_(Transaction.sender_id == user.id, Transaction.receiver_id == user.id)
     )
@@ -123,7 +132,6 @@ async def get_transaction(
     
     - **transaction_id**: Transaction ID
     """
-    from sqlalchemy import or_
     query = select(Transaction).where(
         Transaction.id == transaction_id,
         or_(Transaction.sender_id == user.id, Transaction.receiver_id == user.id)
@@ -132,7 +140,6 @@ async def get_transaction(
     transaction = result.scalar_one_or_none()
     
     if not transaction:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Transaction not found")
     
     return {
@@ -148,3 +155,7 @@ async def get_transaction(
         "created_at": transaction.created_at.isoformat(),
         "updated_at": transaction.updated_at.isoformat(),
     }
+
+@router.get("/mock-data")
+async def read_mock_transactions():
+    return get_mock_transactions()
