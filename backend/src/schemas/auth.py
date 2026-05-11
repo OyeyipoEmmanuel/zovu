@@ -4,9 +4,9 @@ CRITICAL: Never expose ORM models directly — always use separate schemas.
 All monetary amounts are in KOBO (integers).
 """
 # pyrefly: ignore [missing-import]
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import Optional, List
 from enum import Enum
 
 
@@ -87,9 +87,7 @@ class UserKYCSchema(BaseModel):
     bvn: Optional[str] = Field(None, min_length=11, max_length=11)
     nin: Optional[str] = Field(None, min_length=11, max_length=11)
 
-# Use @field_validator instead of @validator
-    @field_validator('nin')
-    @classmethod
+    @validator('nin', always=True)
     def at_least_one_id(cls, v, values):
         if not v and not values.get('bvn'):
             raise ValueError('At least one of bvn or nin is required')
@@ -157,7 +155,7 @@ class CreditResponseSchema(BaseModel):
 class LoanRequestSchema(BaseModel):
     """Request a loan."""
     principal_amount: int = Field(..., gt=0)  # KOBO
-    tenure_days: Literal[7, 14, 30, 60] # This enforces the choices automatically
+    tenure_days: int = Field(..., choices=[7, 14, 30, 60])
 
 
 class LoanResponseSchema(BaseModel):
@@ -180,7 +178,7 @@ class LoanResponseSchema(BaseModel):
 class LoanCalculatorSchema(BaseModel):
     """Calculate loan terms (no database mutation)."""
     principal_amount: int = Field(..., gt=0)  # KOBO
-    tenure_days: Literal[7, 14, 30, 60]
+    tenure_days: int = Field(..., choices=[7, 14, 30, 60])
     
     class Config:
         json_schema_extra = {
