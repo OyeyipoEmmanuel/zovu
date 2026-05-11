@@ -3,7 +3,7 @@ Transactions router — list transactions with cursor-based pagination.
 """
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, Query, HTTPException
-from backend.src.services.mock_data import get_mock_transactions
+from ..services.mock_data import get_mock_transactions
 # pyrefly: ignore [missing-import]
 from sqlalchemy.ext.asyncio import AsyncSession
 # pyrefly: ignore [missing-import]
