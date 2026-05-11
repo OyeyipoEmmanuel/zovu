@@ -49,8 +49,11 @@ async def list_transactions(
         except Exception as e:
             logger.warning("cursor_decode_failed", error=str(e))
     
-    # Query transactions
-    query = select(Transaction).where(Transaction.user_id == user.id)
+    # Query transactions where user is sender or receiver
+    from sqlalchemy import or_
+    query = select(Transaction).where(
+        or_(Transaction.sender_id == user.id, Transaction.receiver_id == user.id)
+    )
     query = query.order_by(desc(Transaction.created_at))
     
     # If cursor provided, filter to items before that timestamp
@@ -86,6 +89,8 @@ async def list_transactions(
         "items": [
             {
                 "id": t.id,
+                "sender_id": t.sender_id,
+                "receiver_id": t.receiver_id,
                 "transaction_type": t.transaction_type,
                 "amount": t.amount,
                 "status": t.status,
@@ -118,9 +123,10 @@ async def get_transaction(
     
     - **transaction_id**: Transaction ID
     """
+    from sqlalchemy import or_
     query = select(Transaction).where(
         Transaction.id == transaction_id,
-        Transaction.user_id == user.id
+        or_(Transaction.sender_id == user.id, Transaction.receiver_id == user.id)
     )
     result = await db.execute(query)
     transaction = result.scalar_one_or_none()
@@ -131,12 +137,14 @@ async def get_transaction(
     
     return {
         "id": transaction.id,
+        "sender_id": transaction.sender_id,
+        "receiver_id": transaction.receiver_id,
         "transaction_type": transaction.transaction_type,
         "amount": transaction.amount,
         "status": transaction.status,
         "squad_reference": transaction.squad_reference,
         "loan_id": transaction.loan_id,
-        "metadata": transaction.metadata,
+        "metadata": transaction.tx_metadata,
         "created_at": transaction.created_at.isoformat(),
         "updated_at": transaction.updated_at.isoformat(),
     }

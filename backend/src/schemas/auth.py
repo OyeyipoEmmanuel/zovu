@@ -79,14 +79,20 @@ class UserProfileSchema(BaseModel):
 
 
 class UserKYCSchema(BaseModel):
-    """KYC submission."""
+    """KYC submission. bvn and nin are optional individually but at least one is required."""
     first_name: str = Field(..., min_length=2)
     last_name: str = Field(..., min_length=2)
     date_of_birth: datetime
-    phone: str = Field(..., regex=r"^\+?234\d{10}$")
-    bvn: str = Field(..., min_length=11, max_length=11)
-    nin: str = Field(..., min_length=11, max_length=11)
-    
+    phone: str = Field(..., pattern=r"^\+?234\d{10}$")
+    bvn: Optional[str] = Field(None, min_length=11, max_length=11)
+    nin: Optional[str] = Field(None, min_length=11, max_length=11)
+
+    @validator('nin', always=True)
+    def at_least_one_id(cls, v, values):
+        if not v and not values.get('bvn'):
+            raise ValueError('At least one of bvn or nin is required')
+        return v
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -94,8 +100,7 @@ class UserKYCSchema(BaseModel):
                 "last_name": "Doe",
                 "date_of_birth": "1990-01-15T00:00:00Z",
                 "phone": "+2348012345678",
-                "bvn": "12345678901",
-                "nin": "12345678901"
+                "bvn": "12345678901"
             }
         }
 
@@ -208,13 +213,16 @@ class LoanCalculationResponseSchema(BaseModel):
 class TransactionResponseSchema(BaseModel):
     """Transaction record."""
     id: str
+    sender_id: Optional[str] = None
+    receiver_id: Optional[str] = None
     transaction_type: str
     amount: int  # KOBO
     status: str
     squad_reference: Optional[str] = None
+    loan_id: Optional[str] = None
     metadata: Optional[dict] = None
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 

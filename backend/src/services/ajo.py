@@ -211,12 +211,14 @@ class AjoService:
         ajo.total_balance += amount
         
         # Create transaction record
+        # Contribution: member (sender) → ajo pool (receiver=None)
         transaction = Transaction(
-            user_id=membership.user_id,
+            sender_id=membership.user_id,
+            receiver_id=None,
             transaction_type=TransactionType.AJO_CONTRIBUTION,
             amount=amount,
             status="completed",
-            metadata={
+            tx_metadata={
                 "ajo_id": ajo.id,
                 "ajo_name": ajo.name,
                 "contribution_frequency": ajo.contribution_frequency,
@@ -284,12 +286,14 @@ class AjoService:
         ajo.total_balance -= payout_amount
         
         # Create transaction record
+        # Payout: ajo pool (sender=None) → receiving member
         transaction = Transaction(
-            user_id=membership.user_id,
+            sender_id=None,
+            receiver_id=membership.user_id,
             transaction_type=TransactionType.AJO_PAYOUT,
             amount=payout_amount,
             status="pending",  # Pending until Squad transfer completes
-            metadata={
+            tx_metadata={
                 "ajo_id": ajo_id,
                 "payout_order": member_index,
             },

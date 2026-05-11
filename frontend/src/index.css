@@ -23,6 +23,20 @@
   body {
     @apply bg-zovu-bg text-zovu-text-light font-dm antialiased;
   }
+
+  input[type="date"] {
+    color-scheme: dark;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0.6;
+    cursor: pointer;
+    filter: invert(1);
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
   
   h1, h2, h3, h4, h5, h6 {
     @apply font-syne text-zovu-text-light;

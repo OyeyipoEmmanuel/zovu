@@ -220,14 +220,16 @@ class LoanService:
         loan.squad_transaction_id = squad_transaction_id
         
         # Create transaction record
+        # Disbursement: system (sender=None) → borrower (receiver)
         transaction = Transaction(
-            user_id=loan.user_id,
+            sender_id=None,
+            receiver_id=loan.user_id,
             loan_id=loan_id,
             transaction_type=TransactionType.LOAN_DISBURSEMENT,
             amount=loan.principal_amount,
             squad_reference=squad_transaction_id,
             status="completed",
-            metadata={"loan_tenure_days": loan.tenure_days},
+            tx_metadata={"loan_tenure_days": loan.tenure_days},
         )
         self.db.add(transaction)
         
@@ -279,14 +281,16 @@ class LoanService:
             loan.status = LoanStatus.REPAYING
         
         # Create transaction record
+        # Repayment: borrower (sender) → system (receiver=None)
         transaction = Transaction(
-            user_id=loan.user_id,
+            sender_id=loan.user_id,
+            receiver_id=None,
             loan_id=loan_id,
             transaction_type=TransactionType.LOAN_REPAYMENT,
             amount=amount,
             squad_reference=squad_reference,
             status="completed",
-            metadata={
+            tx_metadata={
                 "amount_remaining": loan.total_repayment - loan.amount_repaid,
             },
         )
