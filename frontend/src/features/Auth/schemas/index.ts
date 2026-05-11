@@ -23,7 +23,6 @@ export {
 export {
   personalInfoSchema,
   type PersonalInfoFormData,
-  GENDER_OPTIONS,
 } from './personalInfo.schema';
 
 export {
