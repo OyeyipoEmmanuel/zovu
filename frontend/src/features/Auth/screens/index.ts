@@ -1,6 +1,2 @@
-export { PersonalInfo } from './PersonalInfo';
-export { RoleInfo } from './RoleInfo';
-export { IdentityVerification } from './IdentityVerification';
-export { FinancialProfile } from './FinancialProfile';
-export { SignupSuccess } from './SignupSuccess';
+export { Signup } from './Signup';
 export { Login } from './Login';
