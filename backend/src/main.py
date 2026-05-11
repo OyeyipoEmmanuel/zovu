@@ -30,15 +30,17 @@ async def lifespan(app: FastAPI):
         logger.error("database_initialization_failed", error=str(e), exc_info=True)
         raise
     
-    # Test Redis connection
+    # Test Redis connection (non-fatal in development)
     try:
         from src.core.redis_client import redis_client
         redis = await redis_client.get_pool(0)
         await redis.ping()
         logger.info("redis_connected")
     except Exception as e:
-        logger.error("redis_connection_failed", error=str(e), exc_info=True)
-        raise
+        if settings.ENVIRONMENT == "production":
+            logger.error("redis_connection_failed", error=str(e), exc_info=True)
+            raise
+        logger.warning("redis_unavailable_dev_mode", error=str(e))
     
     # Test external APIs are configured
     if not settings.OPENAI_API_KEY:
