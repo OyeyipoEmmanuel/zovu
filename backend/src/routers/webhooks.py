@@ -53,8 +53,8 @@ async def squad_webhook(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing signature")
         
         # Verify signature
-        squad_service = SquadService(db, redis)
-        is_valid = await squad_service.verify_webhook_signature(body, x_squadco_signature)
+        squad_service = SquadService(db=db, redis=redis)
+        is_valid = squad_service.verify_webhook_signature(body, x_squadco_signature)
         
         if not is_valid:
             logger.error("webhook_signature_verification_failed")

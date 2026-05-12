@@ -11,15 +11,31 @@ from sqlalchemy import select, desc, or_
 # pyrefly: ignore [missing-import]
 from src.core.database import get_db
 # pyrefly: ignore [missing-import]
+from src.core.redis_client import get_redis_cache
+# pyrefly: ignore [missing-import]
 from src.dependencies import get_current_user
 # pyrefly: ignore [missing-import]
 from src.models import User, Transaction
+# pyrefly: ignore [missing-import]
+from src.services.squad import SquadService
+# pyrefly: ignore [missing-import]
+from src.core.exceptions import ExternalServiceError
 # pyrefly: ignore [missing-import]
 import structlog
 # pyrefly: ignore [missing-import]
 import base64
 # pyrefly: ignore [missing-import]
 import json
+# pyrefly: ignore [missing-import]
+import httpx
+# pyrefly: ignore [missing-import]
+from pydantic import BaseModel
+# pyrefly: ignore [missing-import]
+from redis.asyncio import Redis
+# pyrefly: ignore [missing-import]
+from typing import Optional
+# pyrefly: ignore [missing-import]
+import uuid
 
 logger = structlog.get_logger()
 
@@ -159,3 +175,160 @@ async def get_transaction(
 @router.get("/mock-data")
 async def read_mock_transactions():
     return get_mock_transactions()
+
+
+# ------------------------------------------------------------------ #
+#  Payment schemas                                                     #
+# ------------------------------------------------------------------ #
+
+class InitiatePaymentRequest(BaseModel):
+    amount_kobo: int
+    callback_url: str
+    currency: str = "NGN"
+    metadata: Optional[dict] = None
+
+
+class ValidateBankPaymentRequest(BaseModel):
+    transaction_ref: str
+    otp: str
+
+
+class AuthorizeCardRequest(BaseModel):
+    transaction_ref: str
+    card_token: str
+
+
+# ------------------------------------------------------------------ #
+#  Payment endpoints                                                   #
+# ------------------------------------------------------------------ #
+
+@router.post(
+    "/initiate",
+    response_model=dict,
+    tags=["Transactions"],
+    summary="Initiate Payment",
+    description="Create a Squad checkout session and return the checkout URL",
+)
+async def initiate_payment(
+    body: InitiatePaymentRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
+):
+    """
+    Initiate a checkout payment via Squad.
+
+    - **amount_kobo**: Amount in kobo (e.g. 10000 = ₦100)
+    - **callback_url**: URL Squad redirects to after payment
+    - **currency**: Default NGN
+    """
+    reference = f"zovu-{uuid.uuid4().hex}"
+    email = f"{user.id}@zovu.internal"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(db=db, redis=redis, http=http)
+            result = await squad.initiate_payment(
+                email=email,
+                amount_kobo=body.amount_kobo,
+                reference=reference,
+                callback_url=body.callback_url,
+                currency=body.currency,
+                metadata=body.metadata,
+            )
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return result
+
+
+@router.get(
+    "/verify/{transaction_ref}",
+    response_model=dict,
+    tags=["Transactions"],
+    summary="Verify Transaction",
+    description="Verify a Squad transaction by its reference",
+)
+async def verify_transaction(
+    transaction_ref: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
+):
+    """
+    Verify transaction status with Squad.
+
+    - **transaction_ref**: The transaction reference (e.g. zovu-abc123)
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(db=db, redis=redis, http=http)
+            result = await squad.verify_transaction(transaction_ref)
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return result
+
+
+@router.post(
+    "/validate-bank-payment",
+    response_model=dict,
+    tags=["Transactions"],
+    summary="Validate Bank Payment",
+    description="Submit OTP to complete a direct bank payment",
+)
+async def validate_bank_payment(
+    body: ValidateBankPaymentRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
+):
+    """
+    Validate a direct bank payment via OTP.
+
+    - **transaction_ref**: Reference from the initial payment
+    - **otp**: One-time password from the bank
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(db=db, redis=redis, http=http)
+            result = await squad.validate_bank_payment(
+                transaction_ref=body.transaction_ref,
+                otp=body.otp,
+            )
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return result
+
+
+@router.post(
+    "/authorize-card",
+    response_model=dict,
+    tags=["Transactions"],
+    summary="Authorize Card Payment",
+    description="Authorize a card payment using a card token",
+)
+async def authorize_card_payment(
+    body: AuthorizeCardRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
+):
+    """
+    Authorize a card payment.
+
+    - **transaction_ref**: Reference from the initial payment
+    - **card_token**: Tokenised card from Squad's frontend SDK
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(db=db, redis=redis, http=http)
+            result = await squad.authorize_card_payment(
+                transaction_ref=body.transaction_ref,
+                card_token=body.card_token,
+            )
+    except ExternalServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return result

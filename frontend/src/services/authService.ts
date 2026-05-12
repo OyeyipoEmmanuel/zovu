@@ -1,10 +1,40 @@
 import { api } from './api';
 
-export interface TokenResponse {
+export type UserRole = 'trader' | 'job_seeker' | 'lender';
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  display_name: string;
+  email_verified: boolean;
+  profile_complete: boolean;
+  squad_account_number: string | null;
+  squad_account_bank: string | null;
+  squad_provisioned: boolean;
+}
+
+export interface AuthResponse {
   access_token: string;
-  refresh_token: string;
   token_type: string;
   expires_in: number;
+  user: AuthUser;
+}
+
+export interface RegisterPayload {
+  role: UserRole;
+  email: string;
+  password: string;
+  confirm_password: string;
+  business_name?: string;
+  full_name?: string;
+  company_name?: string;
+}
+
+export interface RegisterResponse {
+  message: string;
+  email: string;
+  otp?: string;
 }
 
 export interface KycPayload {
@@ -25,27 +55,37 @@ const normalizePhone = (phone: string): string => {
   return cleaned;
 };
 
-export const saveTokens = (tokens: TokenResponse): void => {
-  localStorage.setItem('zovu_access_token', tokens.access_token);
-  localStorage.setItem('zovu_refresh_token', tokens.refresh_token);
-};
-
-export const clearTokens = (): void => {
-  localStorage.removeItem('zovu_access_token');
-  localStorage.removeItem('zovu_refresh_token');
+export const saveAccessToken = (token: string): void => {
+  localStorage.setItem('zovu_access_token', token);
 };
 
 export const getAccessToken = (): string | null =>
   localStorage.getItem('zovu_access_token');
 
-export const requestOtp = (email: string) =>
-  api.post<{ message: string; email: string; otp?: string | null }>('/auth/request-otp', { email });
+export const clearAccessToken = (): void => {
+  localStorage.removeItem('zovu_access_token');
+};
 
-export const verifyOtp = (email: string, code: string, password: string) =>
-  api.post<TokenResponse>('/auth/verify-otp', { email, code, password });
+export const register = (payload: RegisterPayload) =>
+  api.post<RegisterResponse>('/auth/register', payload);
+
+export const verifyOtp = (email: string, otp: string) =>
+  api.post<AuthResponse>('/auth/verify-otp', { email, otp });
+
+export const resendOtp = (email: string) =>
+  api.post<{ message: string }>('/auth/resend-otp', { email });
 
 export const login = (email: string, password: string) =>
-  api.post<TokenResponse>('/auth/login', { email, password });
+  api.post<AuthResponse>('/auth/login', { email, password });
+
+export const refreshToken = () =>
+  api.post<AuthResponse>('/auth/refresh', {});
+
+export const logout = () =>
+  api.post<{ message: string }>('/auth/logout', {}, true);
+
+export const getMe = () =>
+  api.get<AuthUser>('/auth/me', true);
 
 export const submitKyc = (payload: KycPayload) =>
   api.post<{ status: string; message: string }>(
@@ -53,9 +93,3 @@ export const submitKyc = (payload: KycPayload) =>
     { ...payload, phone: normalizePhone(payload.phone) },
     true,
   );
-
-export const getProfile = () =>
-  api.get<{ id: string; email: string; first_name: string; last_name: string; kyc_verified: boolean; pulse_score: number }>('/auth/me', true);
-
-export const logout = (refresh_token: string) =>
-  api.post<{ message: string }>('/auth/logout', { refresh_token }, true);

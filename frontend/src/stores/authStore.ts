@@ -1,20 +1,31 @@
 import { create } from 'zustand';
 
+export type UserRole = 'trader' | 'job_seeker' | 'lender';
+
+export interface AuthUser {
+  email: string;
+  role: UserRole;
+  id?: string;
+  display_name?: string;
+  email_verified?: boolean;
+  profile_complete?: boolean;
+  squad_account_number?: string | null;
+  squad_account_bank?: string | null;
+  squad_provisioned?: boolean;
+  firstName?: string;
+  lastName?: string;
+  businessName?: string;
+  profileCompletion?: number;
+  kycComplete?: boolean;
+  squadVaNumber?: string | null;
+  squadVaBank?: string | null;
+}
+
 interface AuthState {
-  user: {
-    firstName: string;
-    lastName: string;
-    email: string;
-    role: 'Trader' | 'Job Seeker' | 'Lender' | 'Both';
-    businessName: string;
-    profileCompletion: number;
-    kycComplete: boolean;
-    squadVaNumber: string | null;
-    squadVaBank: string | null;
-  } | null;
+  user: AuthUser | null;
   token: string | null;
-  updateUser: (updates: Partial<NonNullable<AuthState['user']>>) => void;
-  setUser: (user: AuthState['user']) => void;
+  updateUser: (updates: Partial<AuthUser>) => void;
+  setUser: (user: AuthUser | null) => void;
   setToken: (token: string | null) => void;
   logout: () => void;
 }
@@ -37,7 +48,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   logout: () => {
     localStorage.removeItem('zovu_access_token');
-    localStorage.removeItem('zovu_refresh_token');
     set({ user: null, token: null });
   },
 }));

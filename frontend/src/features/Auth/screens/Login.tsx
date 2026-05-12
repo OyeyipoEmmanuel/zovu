@@ -10,9 +10,8 @@ import {
   SubmitButton,
 } from '../components';
 import { loginSchema, type LoginFormData } from '../schemas';
-import { login, saveTokens } from '../../../services/authService';
+import { login, saveAccessToken } from '../../../services/authService';
 import { useAuthStore } from '../../../stores/authStore';
-import { mockUser } from '../../../lib/mockData';
 import { ApiError } from '../../../services/api';
 
 export const Login: React.FC = () => {
@@ -34,26 +33,33 @@ export const Login: React.FC = () => {
   const onSubmit = async (data: LoginFormData): Promise<void> => {
     setApiError('');
     try {
-      const tokens = await login(data.email, data.password);
-      saveTokens(tokens);
-
-      // Determine role based on email for testing purposes
-      const role = data.email.toLowerCase().includes('lender') ? 'Lender' : mockUser.role;
-
-      // Mock user initialization
+      const res = await login(data.email, data.password);
+      saveAccessToken(res.access_token);
+      useAuthStore.getState().setToken(res.access_token);
       useAuthStore.getState().setUser({
-        ...mockUser,
-        email: data.email,
-        role: role as 'Trader' | 'Job Seeker' | 'Lender' | 'Both',
+        id: res.user.id,
+        email: res.user.email,
+        role: res.user.role,
+        display_name: res.user.display_name,
+        email_verified: res.user.email_verified,
+        profile_complete: res.user.profile_complete,
+        squad_account_number: res.user.squad_account_number,
+        squad_account_bank: res.user.squad_account_bank,
+        squad_provisioned: res.user.squad_provisioned,
       });
-
       navigate('/dashboard');
     } catch (e: unknown) {
-      setApiError(
-        e instanceof ApiError
-          ? e.message
-          : 'Login failed. Please check your credentials.',
-      );
+      if (e instanceof ApiError) {
+        if (e.code === 'EMAIL_NOT_VERIFIED') {
+          setApiError('Please verify your email first. Check your inbox for a verification code.');
+        } else if (e.code === 'ACCOUNT_SUSPENDED') {
+          setApiError('Your account has been suspended. Please contact support.');
+        } else {
+          setApiError(e.message);
+        }
+      } else {
+        setApiError('Login failed. Please check your credentials.');
+      }
     }
   };
 
@@ -132,9 +138,9 @@ export const Login: React.FC = () => {
         <p className="text-center font-dm text-[13px] text-zovu-text mt-1">
           Don't have an account?{' '}
           <a
-            href="/signup/identity-verification"
+            href="/signup"
             className="text-zovu-primary hover:underline font-medium transition-colors duration-200"
-            onClick={(e) => { e.preventDefault(); navigate('/signup/identity-verification'); }}
+            onClick={(e) => { e.preventDefault(); navigate('/signup'); }}
           >
             Sign up
           </a>

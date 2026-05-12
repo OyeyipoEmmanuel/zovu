@@ -12,6 +12,7 @@ from enum import Enum
 
 # ============== AUTH SCHEMAS (new signup flow) ==============
 
+
 class RegisterSchema(BaseModel):
     """Step-2 registration: role-first, role-specific name field required."""
     role: Literal["trader", "job_seeker", "lender"]
