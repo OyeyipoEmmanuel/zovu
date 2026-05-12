@@ -1,23 +1,22 @@
 """
-Authentication service — OTP flow, registration, login, refresh, logout.
-All tokens are JWT (RS256). Refresh tokens are family-rotated for security.
+Authentication service — new role-first signup flow.
+OTPs stored as sha256 hash in Redis (never in DB).
+Refresh tokens are opaque (secrets.token_urlsafe), stored hashed in DB.
+Rotation with theft detection via used_at.
 """
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from src.models import User, OTP, RefreshToken, UserType, UserStatus
+from sqlalchemy import select, update
+from src.models import User, RefreshToken
 from src.core.security import (
     hash_password,
     verify_password,
     create_access_token,
     verify_access_token,
     hash_refresh_token,
+    validate_password_strength,
+    blacklist_token,
 )
-from src.core.exceptions import (
-    AuthenticationError,
-    ValidationError,
-    ConflictError,
-    NotFoundError,
-)
+from src.core.exceptions import ZovuAPIError
 from src.config import settings
 import structlog
 import uuid
@@ -25,396 +24,544 @@ from datetime import datetime, timedelta, timezone
 from redis.asyncio import Redis
 import secrets
 import hashlib
+from fastapi import status as http_status
 
 logger = structlog.get_logger()
 
+_OTP_TTL = 600          # 10 minutes
+_OTP_ATTEMPTS_TTL = 3600  # 1 hour window for attempt counter
+_OTP_MAX_ATTEMPTS = 5
+_OTP_RESEND_TTL = 3600  # 1 hour window for resend counter
+_OTP_MAX_RESENDS = 3
+
+# Dev-mode in-memory OTP store (used when Redis is unavailable in non-production)
+_dev_otp_store: dict[str, str] = {}
+
 
 def _utcnow() -> datetime:
-    """Naive UTC datetime — SQLite stores datetimes without timezone info."""
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
+
+
+def _display_name(user: User) -> str:
+    return user.business_name or user.full_name or user.company_name or user.first_name or user.email
 
 
 class AuthService:
-    """Authentication service with OTP, registration, login, token rotation."""
-    
+    """Authentication service — new signup flow."""
+
     def __init__(self, db: AsyncSession, redis: Redis):
         self.db = db
         self.redis = redis
-    
-    async def send_otp(self, email: str) -> dict:
-        """
-        Send OTP to email for login or registration.
-        Stores hashed OTP in database with 10-minute expiry.
-        
-        Args:
-            email: User email address
-            
-        Returns:
-            dict with email and message
-            
-        Raises:
-            ValidationError: If email is invalid
-        """
-        email = email.lower().strip()
-        logger.info("otp_request", email=email)
-        
-        # Generate 6-digit OTP
-        otp_code = secrets.randbelow(999999)
-        otp_code_str = str(otp_code).zfill(6)
-        otp_hash = hashlib.sha256(otp_code_str.encode()).hexdigest()
-        
-        # Check if user exists
-        query = select(User).where(User.email == email)
-        result = await self.db.execute(query)
-        existing_user = result.scalar_one_or_none()
-        
-        # Delete any existing OTP for this email
-        query = select(OTP).where(OTP.user_id == (existing_user.id if existing_user else None))
-        result = await self.db.execute(query)
-        old_otps = result.scalars().all()
-        for old_otp in old_otps:
-            await self.db.delete(old_otp)
-        await self.db.commit()
-        
-        # Create new OTP
-        expires_at = _utcnow() + timedelta(minutes=10)
-        
-        if existing_user:
-            otp = OTP(
-                user_id=existing_user.id,
-                code_hash=otp_hash,
-                purpose="login",
-                expires_at=expires_at,
-                max_attempts=3,
-            )
-        else:
-            # Temporary placeholder user for registration flow
-            temp_user = User(
-                id=str(uuid.uuid4()),
-                email=email,
-                password_hash="temp",  # Will be updated on registration
-                phone=b"temp",  # Placeholder encrypted value
-            )
-            self.db.add(temp_user)
-            await self.db.flush()
-            
-            otp = OTP(
-                user_id=temp_user.id,
-                code_hash=otp_hash,
-                purpose="registration",
-                expires_at=expires_at,
-                max_attempts=3,
-            )
-        
-        self.db.add(otp)
-        await self.db.commit()
-        
-        # TODO: Send OTP via email (integrate email service)
-        # For now, log it for development
-        logger.info("otp_generated", email=email, code=otp_code_str)
-        
-        return {
-            "email": email,
-            "message": "OTP sent to email",
-            # REMOVE IN PRODUCTION: only for testing
-            "otp": otp_code_str if settings.DEBUG else None,
-        }
-    
-    async def verify_otp_and_register(
+
+    # ------------------------------------------------------------------ #
+    #  Register                                                            #
+    # ------------------------------------------------------------------ #
+
+    async def register(
         self,
+        role: str,
         email: str,
-        otp_code: str,
         password: str,
+        confirm_password: str,
+        business_name: str | None,
+        full_name: str | None,
+        company_name: str | None,
     ) -> dict:
         """
-        Verify OTP and register/update user account.
-        
-        Args:
-            email: User email
-            otp_code: 6-digit OTP
-            password: User password (8+ chars, will be hashed)
-            
-        Returns:
-            dict with access_token, refresh_token, expires_in
-            
-        Raises:
-            ValidationError: If OTP invalid, expired, or max attempts exceeded
-            AuthenticationError: If registration fails
+        Step 2 of signup. Creates user, stores OTP in Redis, sends email.
+        Returns 201 with OTP in dev mode.
         """
         email = email.lower().strip()
-        logger.info("otp_verification_started", email=email)
-        
-        # Validate password
-        if len(password) < 8:
-            raise ValidationError("Password must be at least 8 characters")
-        
-        # Find user by email
-        query = select(User).where(User.email == email)
-        result = await self.db.execute(query)
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            logger.warning("user_not_found_for_otp", email=email)
-            raise NotFoundError("User not found")
-        
-        # Get latest OTP
-        query = select(OTP).where(OTP.user_id == user.id).order_by(OTP.created_at.desc())
-        result = await self.db.execute(query)
-        otp_record = result.scalar_one_or_none()
-        
-        if not otp_record:
-            raise ValidationError("No OTP found")
-        
-        # Check expiry
-        if otp_record.expires_at < _utcnow():
-            logger.warning("otp_expired", email=email)
-            await self.db.delete(otp_record)
-            await self.db.commit()
-            raise ValidationError("OTP expired")
-        
-        # Check max attempts
-        if otp_record.attempts >= otp_record.max_attempts:
-            logger.warning("otp_max_attempts_exceeded", email=email)
-            await self.db.delete(otp_record)
-            await self.db.commit()
-            raise ValidationError("Too many OTP attempts")
-        
-        # Verify OTP
-        otp_hash = hashlib.sha256(otp_code.encode()).hexdigest()
-        if otp_hash != otp_record.code_hash:
-            otp_record.attempts += 1
-            await self.db.commit()
-            logger.warning("otp_verification_failed", email=email, attempts=otp_record.attempts)
-            raise ValidationError("Invalid OTP")
-        
-        # Update user password and mark OTP used
-        user.password_hash = hash_password(password)
-        user.status = UserStatus.ACTIVE
-        otp_record.used = True
-        otp_record.used_at = _utcnow()
-        
+
+        # 1. Password match
+        if password != confirm_password:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="PASSWORD_MISMATCH",
+                message="Passwords do not match",
+                field="confirm_password",
+            )
+
+        # 2. Password strength
+        try:
+            validate_password_strength(password)
+        except ValueError as exc:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="WEAK_PASSWORD",
+                message=str(exc),
+                field="password",
+            )
+
+        # 3. Role-specific name field
+        if role == "trader" and not business_name:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="VALIDATION_ERROR",
+                message="business_name is required for traders",
+                field="business_name",
+            )
+        if role == "job_seeker" and not full_name:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="VALIDATION_ERROR",
+                message="full_name is required for job seekers",
+                field="full_name",
+            )
+        if role == "lender" and not company_name:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="VALIDATION_ERROR",
+                message="company_name is required for lenders",
+                field="company_name",
+            )
+
+        # 4. Email uniqueness
+        existing = await self.db.scalar(select(User).where(User.email == email))
+        if existing:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_409_CONFLICT,
+                code="EMAIL_ALREADY_EXISTS",
+                message="An account with this email already exists",
+                field="email",
+            )
+
+        # 5. Create user
+        user = User(
+            id=str(uuid.uuid4()),
+            email=email,
+            password_hash=hash_password(password),
+            role=role,
+            email_verified=False,
+            profile_complete=False,
+            is_banned=False,
+            squad_provisioned=False,
+            business_name=business_name,
+            full_name=full_name,
+            company_name=company_name,
+            phone=b"",  # placeholder — filled during KYC
+        )
+        self.db.add(user)
         await self.db.commit()
-        logger.info("user_registered", user_id=user.id, email=email)
-        
-        # Generate tokens
-        return await self._generate_tokens(user.id, user.role)
-    
+        await self.db.refresh(user)
+
+        logger.info("user_created", user_id=user.id, email=email, role=role)
+
+        # 6. Generate + store OTP in Redis
+        otp_code = await self._store_otp(email)
+
+        # 7. Send OTP email
+        await self._send_otp_email(user, otp_code)
+
+        response: dict = {
+            "message": "OTP sent to your email",
+            "email": email,
+        }
+        if settings.ENVIRONMENT != "production":
+            response["otp"] = otp_code
+
+        return response
+
+    # ------------------------------------------------------------------ #
+    #  Verify OTP                                                          #
+    # ------------------------------------------------------------------ #
+
+    async def verify_otp(self, email: str, otp: str) -> dict:
+        """
+        Verify OTP → activate account → provision Squad VA → issue tokens.
+        Returns tokens + user data; caller sets refresh token as cookie.
+        """
+        email = email.lower().strip()
+
+        # 1. Check attempt counter
+        await self._check_otp_attempts(email)
+
+        # 2. Fetch stored hash (Redis first, then dev fallback)
+        stored_hash: str | None = None
+        try:
+            raw = await self.redis.get(f"otp:{email}")
+            if raw:
+                stored_hash = raw.decode() if isinstance(raw, bytes) else raw
+        except Exception:
+            stored_hash = _dev_otp_store.get(email)
+
+        if not stored_hash:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="OTP_EXPIRED",
+                message="OTP has expired or was not found. Request a new one.",
+            )
+
+        # 3. Compare hash
+        otp_hash = hashlib.sha256(otp.encode()).hexdigest()
+        if otp_hash != stored_hash:
+            try:
+                await self.redis.incr(f"otp:attempts:{email}")
+                await self.redis.expire(f"otp:attempts:{email}", _OTP_ATTEMPTS_TTL)
+            except Exception:
+                pass
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="INVALID_OTP",
+                message="The OTP you entered is incorrect",
+            )
+
+        # 4. Consume OTP — single-use
+        try:
+            await self.redis.delete(f"otp:{email}")
+            await self.redis.delete(f"otp:attempts:{email}")
+        except Exception:
+            _dev_otp_store.pop(email, None)
+
+        # 5. Activate account
+        user = await self.db.scalar(select(User).where(User.email == email))
+        if not user:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                code="USER_NOT_FOUND",
+                message="User not found",
+            )
+
+        user.email_verified = True
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        logger.info("email_verified", user_id=user.id, email=email)
+
+        # 6. Provision Squad VA (non-fatal failure — Celery fallback)
+        await self._provision_squad(user)
+
+        # 7. Send welcome email (fire-and-forget)
+        try:
+            from src.services.email_service import EmailService
+            svc = EmailService()
+            await svc.send_welcome(
+                to_email=user.email,
+                user_name=_display_name(user),
+                account_number=user.squad_account_number,
+            )
+        except Exception as exc:
+            logger.warning("welcome_email_failed", user_id=user.id, error=str(exc))
+
+        # 8. Issue tokens
+        return await self._generate_tokens(user)
+
+    # ------------------------------------------------------------------ #
+    #  Resend OTP                                                          #
+    # ------------------------------------------------------------------ #
+
+    async def resend_otp(self, email: str) -> dict:
+        """Rate-limited OTP resend (3 per hour per email)."""
+        email = email.lower().strip()
+
+        # Check resend rate limit
+        resend_key = f"otp:resend:{email}"
+        try:
+            resend_count = await self.redis.get(resend_key)
+        except Exception:
+            resend_count = None
+        if resend_count and int(resend_count) >= _OTP_MAX_RESENDS:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                code="TOO_MANY_RESENDS",
+                message="Too many OTP resend attempts. Try again in an hour.",
+            )
+
+        # Ensure user exists and is not already verified
+        user = await self.db.scalar(select(User).where(User.email == email))
+        if not user:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                code="USER_NOT_FOUND",
+                message="No account found with this email",
+            )
+        if user.email_verified:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="ALREADY_VERIFIED",
+                message="This email is already verified",
+            )
+
+        # Delete old OTP, generate new one
+        try:
+            await self.redis.delete(f"otp:{email}")
+            await self.redis.delete(f"otp:attempts:{email}")
+        except Exception:
+            _dev_otp_store.pop(email, None)
+        otp_code = await self._store_otp(email)
+
+        # Increment resend counter
+        try:
+            await self.redis.incr(resend_key)
+            await self.redis.expire(resend_key, _OTP_RESEND_TTL)
+        except Exception:
+            pass
+
+        await self._send_otp_email(user, otp_code)
+
+        response: dict = {"message": "New OTP sent to your email", "email": email}
+        if settings.ENVIRONMENT != "production":
+            response["otp"] = otp_code
+
+        return response
+
+    # ------------------------------------------------------------------ #
+    #  Login                                                               #
+    # ------------------------------------------------------------------ #
+
     async def login(self, email: str, password: str) -> dict:
-        """
-        Login with email and password.
-        
-        Args:
-            email: User email
-            password: User password
-            
-        Returns:
-            dict with access_token, refresh_token, expires_in
-            
-        Raises:
-            AuthenticationError: If credentials invalid or user frozen
-        """
+        """Email + password login. Triggers OTP resend if unverified."""
         email = email.lower().strip()
         logger.info("login_attempt", email=email)
-        
-        # Find user
-        query = select(User).where(User.email == email)
-        result = await self.db.execute(query)
-        user = result.scalar_one_or_none()
-        
+
+        user = await self.db.scalar(select(User).where(User.email == email))
         if not user:
-            logger.warning("login_user_not_found", email=email)
-            raise AuthenticationError("Invalid credentials")
-        
-        # Check frozen status
-        if user.status == UserStatus.SOFT_FROZEN:
-            logger.warning("login_user_frozen", user_id=user.id, email=email)
-            raise AuthenticationError("Account is frozen")
-        
-        # Verify password
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_401_UNAUTHORIZED,
+                code="INVALID_CREDENTIALS",
+                message="Invalid email or password",
+            )
+
         if not verify_password(password, user.password_hash):
-            logger.warning("login_password_mismatch", user_id=user.id, email=email)
-            raise AuthenticationError("Invalid credentials")
-        
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_401_UNAUTHORIZED,
+                code="INVALID_CREDENTIALS",
+                message="Invalid email or password",
+            )
+
+        if not user.email_verified:
+            # Trigger OTP resend silently
+            try:
+                await self.resend_otp(email)
+            except Exception:
+                pass
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                code="EMAIL_NOT_VERIFIED",
+                message="Please verify your email. A new OTP has been sent.",
+            )
+
+        if user.is_banned:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                code="ACCOUNT_SUSPENDED",
+                message=user.ban_reason or "Your account has been suspended.",
+            )
+
         logger.info("login_successful", user_id=user.id, email=email)
-        return await self._generate_tokens(user.id, user.role)
-    
-    async def refresh_access_token(self, refresh_token: str) -> dict:
+        return await self._generate_tokens(user)
+
+    # ------------------------------------------------------------------ #
+    #  Refresh                                                             #
+    # ------------------------------------------------------------------ #
+
+    async def refresh_access_token(self, raw_refresh_token: str) -> dict:
         """
-        Refresh access token using refresh token.
-        Implements family-based rotation: revokes old token family, issues new family.
-        
-        Args:
-            refresh_token: JWT refresh token
-            
-        Returns:
-            dict with new access_token, refresh_token, expires_in
-            
-        Raises:
-            AuthenticationError: If refresh token invalid or revoked
+        Rotate opaque refresh token.
+        Theft detection: if used_at is already set → revoke entire family.
         """
-        logger.info("refresh_token_attempt")
-        
-        # Verify refresh token JWT
-        payload = verify_access_token(refresh_token)
-        if not payload:
-            logger.warning("refresh_token_verification_failed")
-            raise AuthenticationError("Invalid refresh token")
-        
-        user_id = payload.get("sub")
-        jti = payload.get("jti")
-        
-        # Check if refresh token is blacklisted
-        is_blacklisted = await self.redis.exists(f"blacklist:{jti}")
-        if is_blacklisted:
-            logger.warning("refresh_token_blacklisted", user_id=user_id)
-            raise AuthenticationError("Refresh token revoked")
-        
-        # Get user
-        query = select(User).where(User.id == user_id)
-        result = await self.db.execute(query)
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            logger.warning("refresh_token_user_not_found", user_id=user_id)
-            raise AuthenticationError("User not found")
-        
-        # Get refresh token record (for family rotation)
-        token_hash = hash_refresh_token(refresh_token)
-        query = select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-        result = await self.db.execute(query)
-        refresh_token_record = result.scalar_one_or_none()
-        
-        if not refresh_token_record or refresh_token_record.is_revoked:
-            logger.warning("refresh_token_record_revoked", user_id=user_id)
-            raise AuthenticationError("Refresh token revoked")
-        
-        # Check expiry
-        if refresh_token_record.expires_at < _utcnow():
-            logger.warning("refresh_token_expired", user_id=user_id)
-            raise AuthenticationError("Refresh token expired")
-        
-        # FAMILY-BASED ROTATION: Revoke all tokens in same family
-        family_id = refresh_token_record.family_id
-        query = select(RefreshToken).where(RefreshToken.family_id == family_id)
-        result = await self.db.execute(query)
-        old_tokens = result.scalars().all()
-        
-        for old_token in old_tokens:
-            old_token.is_revoked = True
-            # Also blacklist via Redis for immediate effect
-            await self.redis.setex(f"blacklist:{old_token.id}", 604800, "1")  # 7 days
-        
-        await self.db.commit()
-        logger.info("token_family_rotated", user_id=user_id, family_id=family_id)
-        
-        # Generate new tokens with NEW family
-        return await self._generate_tokens(user.id, user.role)
-    
-    async def logout(self, user_id: str, refresh_token: str) -> dict:
-        """
-        Logout user by blacklisting all tokens in family.
-        
-        Args:
-            user_id: User ID
-            refresh_token: Refresh token to revoke
-            
-        Returns:
-            dict with status
-        """
-        logger.info("logout_started", user_id=user_id)
-        
-        try:
-            # Verify user exists
-            query = select(User).where(User.id == user_id)
-            result = await self.db.execute(query)
-            user = result.scalar_one_or_none()
-            
-            if not user:
-                logger.warning("logout_user_not_found", user_id=user_id)
-                raise AuthenticationError("User not found")
-            
-            # Get refresh token record
-            token_hash = hash_refresh_token(refresh_token)
-            query = select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-            result = await self.db.execute(query)
-            refresh_token_record = result.scalar_one_or_none()
-            
-            if refresh_token_record:
-                # Revoke entire family
-                family_id = refresh_token_record.family_id
-                query = select(RefreshToken).where(RefreshToken.family_id == family_id)
-                result = await self.db.execute(query)
-                tokens_to_revoke = result.scalars().all()
-                
-                for token in tokens_to_revoke:
-                    token.is_revoked = True
-                    # Blacklist immediately
-                    await self.redis.setex(f"blacklist:{token.id}", 604800, "1")
-                
-                await self.db.commit()
-                logger.info("logout_successful", user_id=user_id, family_id=family_id)
-            
-            return {"status": "logged out"}
-        except Exception as e:
-            logger.error("logout_failed", user_id=user_id, error=str(e))
-            raise
-    
-    async def _generate_tokens(self, user_id: str, role: UserType) -> dict:
-        """
-        Generate new access and refresh token pair.
-        
-        Args:
-            user_id: User ID
-            role: User role
-            
-        Returns:
-            dict with access_token, refresh_token, expires_in
-        """
-        # Generate JTIs (JWT IDs) for token tracking
-        access_jti = str(uuid.uuid4())
-        refresh_jti = str(uuid.uuid4())
-        family_id = str(uuid.uuid4())  # Family ID for rotation tracking
-        
-        # Create access token
-        access_token = create_access_token(user_id, role, access_jti)
-        
-        # Create refresh token (also JWT but with longer TTL)
-        from src.core.security import jwt as jose_jwt
-        refresh_exp = _utcnow() + timedelta(days=settings.JWT_REFRESH_TTL_DAYS)
-        refresh_payload = {
-            "sub": user_id,
-            "jti": refresh_jti,
-            "exp": refresh_exp,
-            "iat": _utcnow(),
-        }
-        refresh_token = jose_jwt.encode(
-            refresh_payload,
-            settings.JWT_PRIVATE_KEY,
-            algorithm="RS256",
+        token_hash = hash_refresh_token(raw_refresh_token)
+        record = await self.db.scalar(
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
         )
-        
-        # Store refresh token hash in database (never store raw token)
-        refresh_token_hash = hash_refresh_token(refresh_token)
-        refresh_token_record = RefreshToken(
-            user_id=user_id,
-            token_hash=refresh_token_hash,
-            family_id=family_id,
+
+        if not record or record.is_revoked:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_401_UNAUTHORIZED,
+                code="INVALID_REFRESH_TOKEN",
+                message="Refresh token is invalid or revoked",
+            )
+
+        # Theft detection
+        if record.used_at is not None:
+            logger.warning("refresh_token_reuse_detected", family_id=record.family_id)
+            await self._revoke_family(record.family_id)
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_401_UNAUTHORIZED,
+                code="TOKEN_REUSE_DETECTED",
+                message="Token reuse detected. Please log in again.",
+            )
+
+        if record.expires_at.replace(tzinfo=timezone.utc) < _utcnow():
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_401_UNAUTHORIZED,
+                code="REFRESH_TOKEN_EXPIRED",
+                message="Refresh token has expired",
+            )
+
+        user = await self.db.scalar(select(User).where(User.id == record.user_id))
+        if not user:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_401_UNAUTHORIZED,
+                code="USER_NOT_FOUND",
+                message="User not found",
+            )
+
+        # Mark token consumed (theft detection trip wire)
+        record.used_at = _utcnow()
+        await self.db.commit()
+
+        return await self._generate_tokens(user, family_id=record.family_id)
+
+    # ------------------------------------------------------------------ #
+    #  Logout                                                              #
+    # ------------------------------------------------------------------ #
+
+    async def logout(
+        self,
+        user_id: str,
+        access_jti: str,
+        access_exp: int,
+        raw_refresh_token: str | None,
+    ) -> None:
+        """Blacklist access token JTI + revoke refresh token family."""
+        # 1. Blacklist access token (non-fatal if Redis down)
+        try:
+            await blacklist_token(self.redis, access_jti, access_exp)
+        except Exception as exc:
+            logger.warning("blacklist_token_failed", user_id=user_id, error=str(exc))
+
+        # 2. Revoke refresh token family (if token provided)
+        if raw_refresh_token:
+            token_hash = hash_refresh_token(raw_refresh_token)
+            record = await self.db.scalar(
+                select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+            )
+            if record:
+                await self._revoke_family(record.family_id)
+
+        logger.info("logout_completed", user_id=user_id)
+
+    # ------------------------------------------------------------------ #
+    #  Internal helpers                                                    #
+    # ------------------------------------------------------------------ #
+
+    async def _store_otp(self, email: str) -> str:
+        """Generate 6-digit OTP, store sha256 in Redis. Falls back to in-memory in dev."""
+        otp_code = str(secrets.randbelow(1_000_000)).zfill(6)
+        otp_hash = hashlib.sha256(otp_code.encode()).hexdigest()
+        try:
+            await self.redis.setex(f"otp:{email}", _OTP_TTL, otp_hash)
+        except Exception as exc:
+            if settings.ENVIRONMENT == "production":
+                raise ZovuAPIError(
+                    status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+                    code="SERVICE_UNAVAILABLE",
+                    message="Email verification service temporarily unavailable",
+                )
+            logger.warning("redis_unavailable_using_memory_store", email=email, error=str(exc))
+            _dev_otp_store[email] = otp_hash
+        return otp_code
+
+    async def _check_otp_attempts(self, email: str) -> None:
+        """Raise 429 if OTP attempts exceeded."""
+        try:
+            attempts_raw = await self.redis.get(f"otp:attempts:{email}")
+            attempts = int(attempts_raw) if attempts_raw else 0
+        except Exception:
+            attempts = 0  # Can't check in dev without Redis
+        if attempts >= _OTP_MAX_ATTEMPTS:
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
+                code="TOO_MANY_ATTEMPTS",
+                message="Too many incorrect OTP attempts. Please request a new OTP.",
+            )
+
+    async def _send_otp_email(self, user: User, otp_code: str) -> None:
+        """Send OTP email (non-fatal — log on failure)."""
+        try:
+            from src.services.email_service import EmailService
+            svc = EmailService()
+            await svc.send_otp(
+                to_email=user.email,
+                otp=otp_code,
+                user_name=_display_name(user),
+            )
+        except Exception as exc:
+            logger.warning("otp_email_failed", user_id=user.id, error=str(exc))
+
+    async def _provision_squad(self, user: User) -> None:
+        """
+        Attempt Squad VA creation. On failure: queue Celery retry, do NOT raise.
+        """
+        try:
+            import httpx
+            from src.services.squad import SquadService
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                squad = SquadService(http=http, db=self.db, redis=self.redis)
+                await squad.create_virtual_account(user)
+        except Exception as exc:
+            logger.error(
+                "squad_provisioning_failed_queueing_retry",
+                user_id=user.id,
+                error=str(exc),
+            )
+            user.squad_provisioned = False
+            await self.db.commit()
+            # Queue Celery retry
+            try:
+                from src.workers.squad_tasks import retry_squad_provisioning
+                retry_squad_provisioning.apply_async(
+                    args=[user.id],
+                    queue="critical",
+                    countdown=10,
+                )
+            except Exception as celery_exc:
+                logger.error("celery_queue_failed", user_id=user.id, error=str(celery_exc))
+
+    async def _generate_tokens(
+        self,
+        user: User,
+        family_id: str | None = None,
+    ) -> dict:
+        """
+        Issue access token (JWT RS256) + opaque refresh token.
+        Stores refresh token hash in DB.
+        Returns dict for route to use (route sets cookie).
+        """
+        access_jti = str(uuid.uuid4())
+        new_family_id = family_id or str(uuid.uuid4())
+
+        # Access token (JWT RS256, 15-min TTL)
+        access_token = create_access_token(user.id, user.role or "user", access_jti)
+
+        # Opaque refresh token
+        raw_refresh = secrets.token_urlsafe(64)
+        refresh_hash = hash_refresh_token(raw_refresh)
+        refresh_exp = _utcnow() + timedelta(days=settings.JWT_REFRESH_TTL_DAYS)
+
+        token_record = RefreshToken(
+            user_id=user.id,
+            token_hash=refresh_hash,
+            family_id=new_family_id,
             is_revoked=False,
             expires_at=refresh_exp,
         )
-        self.db.add(refresh_token_record)
+        self.db.add(token_record)
         await self.db.commit()
-        
+
         logger.info(
-            "tokens_generated",
-            user_id=user_id,
-            family_id=family_id,
-            ttl_seconds=settings.JWT_ACCESS_TTL_MINUTES * 60,
+            "tokens_issued",
+            user_id=user.id,
+            family_id=new_family_id,
+            access_ttl=settings.JWT_ACCESS_TTL_MINUTES * 60,
         )
-        
+
         return {
             "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
+            "refresh_token": raw_refresh,   # route sets this as httpOnly cookie
             "expires_in": settings.JWT_ACCESS_TTL_MINUTES * 60,
+            "user": user,
         }
+
+    async def _revoke_family(self, family_id: str) -> None:
+        """Mark all tokens in a family as revoked."""
+        records = (
+            await self.db.scalars(
+                select(RefreshToken).where(RefreshToken.family_id == family_id)
+            )
+        ).all()
+        for r in records:
+            r.is_revoked = True
+        await self.db.commit()
+        logger.info("token_family_revoked", family_id=family_id)

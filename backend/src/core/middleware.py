@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from src.config import settings
-from src.core.exceptions import ZovuException
+from src.core.exceptions import ZovuException, ZovuAPIError
 import structlog
 import uuid
 from typing import Callable
@@ -52,6 +52,26 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Callable:
         try:
             return await call_next(request)
+        except ZovuAPIError as exc:
+            request_id = str(uuid.uuid4())
+            logger.warning(
+                "api_error",
+                code=exc.error_code,
+                status_code=exc.status_code,
+                field=exc.error_field,
+            )
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={
+                    "ok": False,
+                    "error": {
+                        "code": exc.error_code,
+                        "message": exc.detail,
+                        "field": exc.error_field,
+                    },
+                    "request_id": request_id,
+                },
+            )
         except ZovuException as exc:
             logger.warning("zovu_exception", status_code=exc.status_code, detail=exc.detail)
             return JSONResponse(

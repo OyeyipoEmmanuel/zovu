@@ -20,3 +20,5 @@ flower==2.0.1
 python-multipart==0.0.9
 prometheus-fastapi-instrumentator==7.0.0
 aiosqlite==0.20.0
+aiosmtplib==2.0.1
+email-validator==2.2.0

@@ -11,7 +11,7 @@ from src.core.redis_client import (
     get_redis_db,
 )
 from src.core.security import verify_access_token
-from src.core.exceptions import AuthenticationError, AuthorizationError
+from src.core.exceptions import AuthenticationError, AuthorizationError, ZovuAPIError
 from src.models import User, UserType
 from fastapi import Header, Cookie
 from typing import Optional
@@ -71,10 +71,13 @@ async def get_current_user(
         raise AuthenticationError("Invalid token structure")
     
     # Check blacklist (logout + revocation)
-    is_blacklisted = await redis.exists(f"blacklist:{jti}")
+    try:
+        is_blacklisted = await redis.exists(f"blacklist:{jti}")
+    except Exception:
+        is_blacklisted = False  # Redis down in dev — skip blacklist check
     if is_blacklisted:
         logger.warning("token_blacklisted", user_id=user_id, jti=jti)
-        raise AuthenticationError("Token has been revoked")
+        raise ZovuAPIError(status_code=401, code="TOKEN_REVOKED", message="Token has been revoked")
     
     # Get user from database
     from sqlalchemy import select
@@ -85,11 +88,15 @@ async def get_current_user(
     
     if not user:
         logger.warning("user_not_found", user_id=user_id)
-        raise AuthenticationError("User not found")
+        raise ZovuAPIError(status_code=401, code="USER_NOT_FOUND", message="User not found")
     
-    if user.status == "frozen":
-        logger.warning("user_frozen", user_id=user_id)
-        raise AuthenticationError("Account is frozen")
+    if getattr(user, "is_banned", False):
+        logger.warning("user_banned", user_id=user_id)
+        raise ZovuAPIError(
+            status_code=403,
+            code="ACCOUNT_SUSPENDED",
+            message=user.ban_reason or "Your account has been suspended.",
+        )
     
     return user
 

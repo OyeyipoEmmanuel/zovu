@@ -194,9 +194,21 @@ class User(Base):
     # Pulse Score (aggregate from signals)
     pulse_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # 0-850
     
+    # New signup-flow fields
+    role: Mapped[str | None] = mapped_column(String(20))  # trader | job_seeker | lender
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    full_name: Mapped[str | None] = mapped_column(String(255))   # job_seeker
+    company_name: Mapped[str | None] = mapped_column(String(255))  # lender
+    profile_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    ban_reason: Mapped[str | None] = mapped_column(Text)
+
     # Squad integration
     squad_virtual_account_id: Mapped[str | None] = mapped_column(String(100))
+    squad_account_id: Mapped[str | None] = mapped_column(String(100))  # from Squad response
     squad_account_number: Mapped[str | None] = mapped_column(String(20))
+    squad_account_bank: Mapped[str | None] = mapped_column(String(100))
+    squad_provisioned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -266,7 +278,7 @@ class OTP(Base):
 
 
 class RefreshToken(Base):
-    """Refresh tokens with family-based rotation."""
+    """Refresh tokens with family-based rotation and theft detection."""
     __tablename__ = "refresh_tokens"
     
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -274,13 +286,16 @@ class RefreshToken(Base):
     token_hash: Mapped[str] = mapped_column(String(255), unique=True)  # SHA256 hash
     family_id: Mapped[str] = mapped_column(String(100))  # For rotation tracking
     device_id: Mapped[str | None] = mapped_column(String(100))
+    device_fingerprint: Mapped[str | None] = mapped_column(String(500))
     is_revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # set on rotation; if set = token was already consumed
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     
     __table_args__ = (
         Index("ix_refresh_tokens_user_id", "user_id"),
         Index("ix_refresh_tokens_family_id", "family_id"),
+        Index("ix_refresh_tokens_token_hash", "token_hash"),
     )
 
 

@@ -2,12 +2,15 @@
 FastAPI application factory with lifespan context manager.
 """
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from src.config import settings
 from src.core.database import init_db, close_db
 from src.core.redis_client import close_redis
 from src.core.middleware import add_middleware
+from src.core.exceptions import ZovuAPIError
 # pyrefly: ignore [missing-import]
 import structlog
 # pyrefly: ignore [missing-import]
@@ -97,7 +100,42 @@ def create_app() -> FastAPI:
     
     # Add middleware
     add_middleware(app)
-    
+
+    # ZovuAPIError → envelope format
+    @app.exception_handler(ZovuAPIError)
+    async def zovu_api_error_handler(request: Request, exc: ZovuAPIError) -> JSONResponse:
+        import uuid as _uuid
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "ok": False,
+                "error": {
+                    "code": exc.error_code,
+                    "message": exc.detail,
+                    "field": exc.error_field,
+                },
+                "request_id": str(_uuid.uuid4()),
+            },
+        )
+
+    # Pydantic validation errors → envelope format
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = exc.errors()
+        first = errors[0] if errors else {}
+        field = ".".join(str(l) for l in first.get("loc", [])[1:]) or None
+        return JSONResponse(
+            status_code=422,
+            content={
+                "ok": False,
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": first.get("msg", "Validation error"),
+                    "field": field,
+                },
+            },
+        )
+
     # Add Prometheus instrumentation
     Instrumentator().instrument(app).expose(app)
     

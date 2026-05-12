@@ -23,8 +23,8 @@ argon2_hasher = PasswordHasher(
     parallelism=2,
 )
 
-# Fernet cipher for PII encryption
-fernet_cipher = Fernet(settings.FIELD_ENCRYPTION_KEY.encode())
+# Fernet cipher for PII encryption (only initialised if key is configured)
+fernet_cipher = Fernet(settings.FIELD_ENCRYPTION_KEY.encode()) if settings.FIELD_ENCRYPTION_KEY else None
 
 
 def hash_password(password: str) -> str:
@@ -77,11 +77,15 @@ def verify_access_token(token: str) -> Optional[dict]:
 
 def encrypt_pii(plaintext: str) -> bytes:
     """Encrypt PII (phone, BVN, NIN) using Fernet."""
+    if not fernet_cipher:
+        raise RuntimeError("FIELD_ENCRYPTION_KEY not configured")
     return fernet_cipher.encrypt(plaintext.encode())
 
 
 def decrypt_pii(ciphertext: bytes) -> str:
     """Decrypt PII using Fernet."""
+    if not fernet_cipher:
+        raise RuntimeError("FIELD_ENCRYPTION_KEY not configured")
     return fernet_cipher.decrypt(ciphertext).decode()
 
 
@@ -100,3 +104,33 @@ def hash_refresh_token(token: str) -> str:
 def verify_refresh_token_hash(token: str, stored_hash: str) -> bool:
     """Verify refresh token against stored hash."""
     return hash_refresh_token(token) == stored_hash
+
+
+async def blacklist_token(redis, jti: str, exp: int) -> None:
+    """Blacklist an access token JTI until its natural expiry."""
+    import time
+    ttl = max(int(exp - time.time()), 1)
+    await redis.setex(f"blacklist:{jti}", ttl, "1")
+
+
+async def is_token_blacklisted(redis, jti: str) -> bool:
+    """Check if a token JTI is blacklisted."""
+    return bool(await redis.exists(f"blacklist:{jti}"))
+
+
+def validate_password_strength(password: str) -> None:
+    """
+    Enforce password policy: 8+ chars, upper, lower, digit, special char.
+    Raises ValueError with a descriptive message on failure.
+    """
+    import re
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters")
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least one lowercase letter")
+    if not re.search(r"\d", password):
+        raise ValueError("Password must contain at least one digit")
+    if not re.search(r"[^A-Za-z0-9]", password):
+        raise ValueError("Password must contain at least one special character")
