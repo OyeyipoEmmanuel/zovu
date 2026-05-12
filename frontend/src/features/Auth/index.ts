@@ -5,4 +5,5 @@ export {
   FinancialProfile,
   SignupSuccess,
   Login,
+  Signup,
 } from './screens';

@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+export const GENDER_OPTIONS = [
+  { value: 'Male', label: 'Male' },
+  { value: 'Female', label: 'Female' },
+  { value: 'Other', label: 'Other' },
+  { value: 'Prefer not to say', label: 'Prefer not to say' },
+] as const;
+
 export const personalInfoSchema = z.object({
   role: z.enum(['Trader', 'Job Seeker', 'Both', 'Lender'], {
     message: 'Please select a role',
