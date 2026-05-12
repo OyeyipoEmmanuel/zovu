@@ -23,7 +23,7 @@ import {
 const DashboardRouter = () => {
   const { user } = useAuthStore();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'Lender') return <Navigate to="/dashboard/lender" replace />;
+  if (user.role === 'lender') return <Navigate to="/dashboard/lender" replace />;
   return <Navigate to="/dashboard/trader" replace />;
 };
 

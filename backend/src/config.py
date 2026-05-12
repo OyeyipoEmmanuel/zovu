@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     # Squad API Configuration
     SQUAD_SECRET_KEY: str
+    SQUAD_PUBLIC_KEY: str = ""   # Used for checkout initiation
     SQUAD_BASE_URL: str  # https://sandbox-api-d.squadco.com (dev) or https://api-d.squadco.com (prod)
     SQUAD_WEBHOOK_IP: str = ""  # Optional IP whitelist for Squad webhooks
     

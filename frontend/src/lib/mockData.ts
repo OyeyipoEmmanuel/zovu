@@ -43,7 +43,7 @@ export interface UserProfile {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'Trader' | 'Job Seeker';
+  role: 'trader' | 'job_seeker' | 'lender';
   businessName: string;
   profileCompletion: number;
   avatarUrl: string | null;
@@ -56,7 +56,7 @@ export const mockUser: UserProfile = {
   firstName: 'Mama',
   lastName: 'Tunde',
   email: 'mama.tunde@zovu.ng',
-  role: 'Trader',
+  role: 'trader',
   businessName: 'Mama Tunde Provisions',
   profileCompletion: 60,
   avatarUrl: null,

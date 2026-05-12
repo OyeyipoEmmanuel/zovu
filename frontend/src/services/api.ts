@@ -2,10 +2,14 @@ const BASE_URL = '/api/v1';
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code: string;
+  field: string | null;
+  constructor(status: number, message: string, code = 'UNKNOWN_ERROR', field: string | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
+    this.field = field;
   }
 }
 
@@ -25,10 +29,28 @@ const request = async <T>(
   };
   if (auth) Object.assign(headers, getAuthHeader());
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
-  const data = await res.json().catch(() => ({ detail: res.statusText }));
-  if (!res.ok) throw new ApiError(res.status, data.detail ?? 'Request failed');
-  return data as T;
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
+
+  const envelope = await res.json().catch(() => ({
+    ok: false,
+    error: { code: 'PARSE_ERROR', message: res.statusText, field: null },
+  }));
+
+  if (envelope.ok === false) {
+    const err = envelope.error ?? {};
+    throw new ApiError(
+      res.status,
+      err.message ?? 'Request failed',
+      err.code ?? 'UNKNOWN_ERROR',
+      err.field ?? null,
+    );
+  }
+
+  return envelope.data as T;
 };
 
 export const api = {
