@@ -144,8 +144,8 @@ class User(Base):
     primary_language: Mapped[str | None] = mapped_column(String(50))
 
     # Seeker profile
-    skills_list: Mapped[list | None] = mapped_column(JSONB)
-    languages_spoken: Mapped[list | None] = mapped_column(JSONB)
+    skills_list: Mapped[list | None] = mapped_column(JSON)
+    languages_spoken: Mapped[list | None] = mapped_column(JSON)
 
     # Behavioral scoring
     sales_consistency: Mapped[float] = mapped_column(Float, default=0.0)
