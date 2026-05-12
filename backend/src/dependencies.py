@@ -12,7 +12,7 @@ from src.core.redis_client import (
 )
 from src.core.security import verify_access_token
 from src.core.exceptions import AuthenticationError, AuthorizationError
-from src.models import User, UserRole
+from src.models import User, UserType
 from fastapi import Header, Cookie
 from typing import Optional
 import structlog
@@ -94,28 +94,29 @@ async def get_current_user(
     return user
 
 
-async def require_role(
-    required_role: UserRole,
-):
-    """Dependency factory for role-based authorization."""
+async def require_role(required_role: UserType):
+    """
+    Dependency factory for role-based authorization.
+    Allows access if the user's type matches the required_role
+    OR if the user is registered as 'BOTH' (Trader & Seeker).
+    """
+
     async def check_role(user: User = Depends(get_current_user)) -> User:
-        if user.role != required_role:
-            logger.warning(
-                "authorization_failed",
-                user_id=user.id,
-                required_role=required_role,
-                user_role=user.role,
-            )
-            raise AuthorizationError("Insufficient permissions")
-        return user
-    
+        # 1. Check if user matches required role
+        # 2. OR check if the user is 'BOTH', which grants universal access
+        if user.user_type == required_role or user.user_type == UserType.BOTH:
+            return user
+
+        # If neither condition is met, log the failure and block access
+        logger.warning(
+            "authorization_failed",
+            user_id=user.id,
+            required_role=required_role,
+            actual_user_type=user.user_type,
+        )
+        raise AuthorizationError(f"Insufficient permissions. Required: {required_role}")
+
     return check_role
-
-
-def require_admin():
-    """Dependency for admin-only endpoints."""
-    return require_role(UserRole.ADMIN)
-
 
 async def get_optional_user(
     authorization: Optional[str] = Header(None),
