@@ -5,7 +5,7 @@ interface AuthState {
     firstName: string;
     lastName: string;
     email: string;
-    role: 'Trader' | 'Job Seeker';
+    role: 'Trader' | 'Job Seeker' | 'Lender' | 'Both';
     businessName: string;
     profileCompletion: number;
     kycComplete: boolean;

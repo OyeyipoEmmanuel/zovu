@@ -164,13 +164,99 @@ export const mockPulseSignals: PulseSignal[] = [
 ];
 
 export const mockPulseHistory: PulseHistoryPoint[] = [
-  { month: 'Nov', score: 40 },
-  { month: 'Dec', score: 210 },
-  { month: 'Jan', score: 380 },
-  { month: 'Feb', score: 500 },
-  { month: 'Mar', score: 600 },
-  { month: 'Apr', score: 687 },
+  { month: 'Jan', score: 320 },
+  { month: 'Feb', score: 380 },
+  { month: 'Mar', score: 450 },
+  { month: 'Apr', score: 590 },
+  { month: 'May', score: 687 },
 ];
+
+export const mockLenderStats = {
+  total_funded: 4200000,
+  active_loans: 12,
+  repayment_rate: 94
+};
+
+export const mockBorrowers = [
+  {
+    id: "b001",
+    display_name: "Trader •••",
+    pulse_score: 687,
+    tier: "Gold",
+    lga: "Surulere",
+    loan_amount_requested: 200000,
+    purpose: "Restocking",
+    repayment_days: 60
+  },
+  {
+    id: "b002",
+    display_name: "Trader •••",
+    pulse_score: 542,
+    tier: "Silver",
+    lga: "Ikeja",
+    loan_amount_requested: 150000,
+    purpose: "Equipment",
+    repayment_days: 30
+  },
+  {
+    id: "b003",
+    display_name: "Seeker •••",
+    pulse_score: 478,
+    tier: "Bronze",
+    lga: "Oshodi",
+    loan_amount_requested: 80000,
+    purpose: "Emergency",
+    repayment_days: 30
+  },
+  {
+    id: "b004",
+    display_name: "Trader •••",
+    pulse_score: 761,
+    tier: "Platinum",
+    lga: "Lagos Island",
+    loan_amount_requested: 500000,
+    purpose: "Restocking",
+    repayment_days: 90
+  }
+];
+
+export const mockFullBorrower = {
+  id: "b001",
+  display_name: "Trader •••",
+  full_name: "Oluwatunde Ajayi",
+  pulse_score: 687,
+  tier: "Gold",
+  lga: "Surulere",
+  loan_amount_requested: 200000,
+  purpose: "Restocking",
+  repayment_days: 60,
+  signals: {
+    transaction_frequency: 78,
+    transaction_growth: 65,
+    gig_completion_rate: 70,
+    repayment_history: 55,
+    network_density: 60,
+    financial_discipline: 72
+  },
+  transaction_summary: {
+    avg_monthly_volume: 284500,
+    transaction_days_per_month: 22,
+    longest_streak: 14
+  }
+};
+
+export const mockLenderProfile = {
+  organization_name: "Eko Cooperative Society",
+  account_type: "cooperative",
+  phone: "08012345678",
+  verified: false,
+  current_step: 1
+};
+
+export const mockLenderProfileStatus = {
+  verified: true,
+  current_step: 'complete'
+};
 
 export const mockGigs: Gig[] = [
   {
@@ -252,4 +338,51 @@ export const LAGOS_LGAS = [
   'Badagry', 'Epe', 'Eti-Osa', 'Ibeju-Lekki', 'Ifako-Ijaiye',
   'Ikeja', 'Ikorodu', 'Kosofe', 'Lagos Island', 'Lagos Mainland',
   'Mushin', 'Ojo', 'Oshodi-Isolo', 'Shomolu', 'Surulere',
+];
+
+export const mockMyLoans = [
+  {
+    borrower_name: "Oluwatunde Ajayi",
+    amount: 200000,
+    disbursed_at: "2026-04-12",
+    repayment_days: 60,
+    due_date: "2026-06-11",
+    amount_repaid: 103000,
+    total_repayment: 206000,
+    status: "active",
+    transaction_ref: "REF20260412S67978035"
+  },
+  {
+    borrower_name: "Chidinma Okafor",
+    amount: 150000,
+    disbursed_at: "2026-03-01",
+    repayment_days: 30,
+    due_date: "2026-03-31",
+    amount_repaid: 154500,
+    total_repayment: 154500,
+    status: "repaid",
+    transaction_ref: "REF20260301S45123091"
+  },
+  {
+    borrower_name: "Musa Abdullahi",
+    amount: 80000,
+    disbursed_at: "2026-03-15",
+    repayment_days: 30,
+    due_date: "2026-04-14",
+    amount_repaid: 20000,
+    total_repayment: 82400,
+    status: "overdue",
+    transaction_ref: "REF20260315S12098234"
+  },
+  {
+    borrower_name: "Folake Adeyemi",
+    amount: 500000,
+    disbursed_at: "2026-04-20",
+    repayment_days: 90,
+    due_date: "2026-07-19",
+    amount_repaid: 0,
+    total_repayment: 515000,
+    status: "active",
+    transaction_ref: "REF20260420S99012345"
+  }
 ];

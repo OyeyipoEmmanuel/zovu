@@ -25,7 +25,7 @@ export const LandingPage: React.FC = () => {
           <Link to="/login">
             <Button variant="secondary" className="hidden sm:flex">Log In</Button>
           </Link>
-          <Link to="/signup/personal-info">
+          <Link to="/signup">
               <Button variant="primary">Open Account</Button>
           </Link>
         </div>
@@ -43,8 +43,13 @@ export const LandingPage: React.FC = () => {
             We turn how you trade, work, and save into a credit identity that unlocks real financial services — loans, savings, insurance.
           </p>
 
-          <div className="">
-            <Link to="/signup/personal-info"><Button variant="primary" className="text-[16px] w-full md:w-[50%] px-8">Get Started</Button></Link>
+          <div className="flex flex-col sm:flex-row gap-4 w-full md:w-[80%]">
+            <Link to="/signup" className="w-full">
+              <Button variant="primary" className="text-[16px] w-full px-8">Get Started</Button>
+            </Link>
+            <Link to="/signup?role=Lender" className="w-full">
+              <Button variant="secondary" className="text-[16px] w-full px-8">Join as a Lender</Button>
+            </Link>
           </div>
 
         </div>

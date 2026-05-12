@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { requestOtp, verifyOtp, saveTokens } from '../../../services/authService';
+import { useAuthStore } from '../../../stores/authStore';
 import { ApiError } from '../../../services/api';
 import {
   AuthLayout,
@@ -25,6 +26,9 @@ export const Signup: React.FC = () => {
   const [apiError, setApiError] = useState('');
   const [savedFormData, setSavedFormData] = useState<PersonalInfoFormData | null>(null);
 
+  const [searchParams] = useSearchParams();
+  const initialRole = searchParams.get('role');
+
   const {
     register,
     handleSubmit,
@@ -36,6 +40,9 @@ export const Signup: React.FC = () => {
       email: '',
       password: '',
       businessName: '',
+      role: (initialRole === 'Lender' || initialRole === 'Trader' || initialRole === 'Job Seeker' || initialRole === 'Both') 
+        ? initialRole as 'Lender' | 'Trader' | 'Job Seeker' | 'Both' 
+        : undefined,
     },
   });
 
@@ -66,6 +73,20 @@ export const Signup: React.FC = () => {
     try {
       const tokens = await verifyOtp(savedFormData.email, otpCode, savedFormData.password);
       saveTokens(tokens);
+      
+      // Mock user initialization based on signup data
+      useAuthStore.getState().setUser({
+        firstName: 'New',
+        lastName: 'User',
+        email: savedFormData.email,
+        role: savedFormData.role,
+        businessName: savedFormData.businessName || '',
+        profileCompletion: 20,
+        kycComplete: false,
+        squadVaNumber: null,
+        squadVaBank: null,
+      });
+
       navigate('/dashboard');
     } catch (e: unknown) {
       setApiError(
@@ -141,8 +162,8 @@ export const Signup: React.FC = () => {
         {/* Role Selection */}
         <div className="flex flex-col gap-2">
           <span className="font-dm text-[14px] text-zovu-text-light font-medium">Select your role</span>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {(['Trader', 'Job Seeker'] as const).map((roleOption) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {(['Trader', 'Job Seeker', 'Both', 'Lender'] as const).map((roleOption) => (
               <label
                 key={roleOption}
                 className={`
@@ -197,11 +218,11 @@ export const Signup: React.FC = () => {
         </FormField>
 
         {/* Business Name (Conditional) */}
-        {(role === 'Trader' || role === 'Both') && (
-          <FormField label="Business Name" id="businessName" error={errors.businessName}>
+        {(role === 'Trader' || role === 'Both' || role === 'Lender') && (
+          <FormField label={role === 'Lender' ? 'Organization / Lender Name' : 'Business Name'} id="businessName" error={errors.businessName}>
             <TextInput
               id="businessName"
-              placeholder="Enter your business name"
+              placeholder={role === 'Lender' ? 'Enter your organization name' : 'Enter your business name'}
               hasError={!!errors.businessName}
               {...register('businessName')}
             />
