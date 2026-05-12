@@ -1,5 +1,5 @@
 ---
-name: Economic Clarity
+name: Economic Clarity------
 colors:
   surface: '#101412'
   surface-dim: '#101412'
