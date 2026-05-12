@@ -10,11 +10,89 @@ from typing import Optional, List, Literal
 from enum import Enum
 
 
-# ============== AUTH SCHEMAS ==============
+# ============== AUTH SCHEMAS (new signup flow) ==============
+
+class RegisterSchema(BaseModel):
+    """Step-2 registration: role-first, role-specific name field required."""
+    role: Literal["trader", "job_seeker", "lender"]
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    confirm_password: str
+    business_name: Optional[str] = Field(None, min_length=1)   # required if role=trader
+    full_name: Optional[str] = Field(None, min_length=1)        # required if role=job_seeker
+    company_name: Optional[str] = Field(None, min_length=1)     # required if role=lender
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "role": "trader",
+                "email": "mamatunde@test.com",
+                "password": "ZovuTest@123",
+                "confirm_password": "ZovuTest@123",
+                "business_name": "Mama Tunde Provisions"
+            }
+        }
+
+
+class VerifyOTPSchema(BaseModel):
+    """Verify the 6-digit email OTP."""
+    email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+    class Config:
+        json_schema_extra = {
+            "example": {"email": "mamatunde@test.com", "otp": "123456"}
+        }
+
+
+class ResendOTPSchema(BaseModel):
+    """Resend OTP to email (rate-limited)."""
+    email: EmailStr
+
+
+class LoginSchema(BaseModel):
+    """Login with email and password."""
+    email: EmailStr
+    password: str
+
+
+class UserInTokenSchema(BaseModel):
+    """User object embedded inside auth responses."""
+    id: str
+    email: str
+    role: Optional[str] = None
+    display_name: str
+    email_verified: bool
+    profile_complete: bool
+    squad_account_number: Optional[str] = None
+    squad_account_bank: Optional[str] = None
+    squad_provisioned: bool
+
+    class Config:
+        from_attributes = True
+
+
+class AuthDataSchema(BaseModel):
+    """Data payload for login / verify-otp / refresh responses."""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int  # seconds
+    user: UserInTokenSchema
+
+
+class RegisterDataSchema(BaseModel):
+    """Data payload for the register (201) response."""
+    message: str
+    email: str
+    otp: Optional[str] = None  # ONLY in development
+
+
+# ============== LEGACY AUTH SCHEMAS (kept for KYC / existing routes) ==============
+
 class OTPRequestSchema(BaseModel):
     """Request OTP via email."""
     email: EmailStr
-    
+
     class Config:
         json_schema_extra = {
             "example": {"email": "user@example.com"}
@@ -22,11 +100,11 @@ class OTPRequestSchema(BaseModel):
 
 
 class OTPVerificationSchema(BaseModel):
-    """Verify OTP and create account."""
+    """Verify OTP and create account (legacy)."""
     email: EmailStr
     code: str = Field(..., min_length=6, max_length=6)
     password: str = Field(..., min_length=8)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -37,14 +115,8 @@ class OTPVerificationSchema(BaseModel):
         }
 
 
-class LoginSchema(BaseModel):
-    """Login with email and password."""
-    email: EmailStr
-    password: str
-
-
 class TokenResponseSchema(BaseModel):
-    """JWT token response."""
+    """JWT token response (legacy — kept for backward compat)."""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
@@ -52,12 +124,12 @@ class TokenResponseSchema(BaseModel):
 
 
 class RefreshTokenSchema(BaseModel):
-    """Refresh access token."""
+    """Refresh access token (legacy)."""
     refresh_token: str
 
 
 class LogoutSchema(BaseModel):
-    """Logout request."""
+    """Logout request (legacy)."""
     refresh_token: str
 
 
@@ -66,14 +138,24 @@ class UserProfileSchema(BaseModel):
     """User profile information."""
     id: str
     email: str
+    role: Optional[str] = None
+    email_verified: bool = False
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    business_name: Optional[str] = None
+    company_name: Optional[str] = None
     phone: Optional[str] = None  # Never expose encrypted value
     date_of_birth: Optional[datetime] = None
-    kyc_verified: bool
-    pulse_score: int
+    kyc_verified: bool = False
+    pulse_score: int = 0
+    squad_account_number: Optional[str] = None
+    squad_account_bank: Optional[str] = None
+    squad_provisioned: bool = False
+    profile_complete: bool = False
+    is_banned: bool = False
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 

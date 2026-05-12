@@ -1,222 +1,183 @@
 """
 Squad API integration service — virtual accounts, transfers, webhook handling.
-HMAC-SHA512 verification for webhook security.
-Idempotency via Redis atomic checks.
+Uses a shared httpx.AsyncClient (connection pooling, timeout=30s).
+All external calls wrapped with tenacity (3 attempts, exponential backoff).
+HMAC-SHA512 signature verification for webhook security.
 """
 from src.config import settings
-from src.models import Transaction, TransactionType, SquadWebhookLog
+from src.models import User, SquadWebhookLog
 from src.core.exceptions import ExternalServiceError, ValidationError
 import structlog
 import httpx
 import hmac
 import hashlib
-import json
-from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from redis.asyncio import Redis
-import uuid
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logger = structlog.get_logger()
 
 
 class SquadService:
-    """Squad API integration service."""
-    
-    def __init__(self, db: AsyncSession, redis: Redis):
+    """Squad API integration service with shared HTTP client."""
+
+    def __init__(self, http: httpx.AsyncClient, db: AsyncSession, redis: Redis):
+        self.http = http
         self.db = db
         self.redis = redis
-        self.base_url = settings.SQUAD_BASE_URL
+        self.base_url = settings.SQUAD_BASE_URL.rstrip("/")
         self.secret_key = settings.SQUAD_SECRET_KEY
-    
-    async def create_virtual_account(self, user_id: str, email: str, phone: str) -> dict:
+
+    # ------------------------------------------------------------------ #
+    #  Virtual account                                                     #
+    # ------------------------------------------------------------------ #
+
+    async def create_virtual_account(self, user: User) -> dict:
         """
-        Create virtual account on Squad for user.
-        Called once during KYC verification.
-        
-        Args:
-            user_id: User ID
-            email: User email
-            phone: User phone (will be encrypted separately)
-            
-        Returns:
-            dict with squad_id and account details
-            
-        Raises:
-            ExternalServiceError: If Squad API call fails
+        Idempotent: if squad_account_id already set, return existing data.
+        Called immediately after OTP verification succeeds.
         """
-        logger.info("squad_virtual_account_creation", user_id=user_id, email=email)
-        
+        if user.squad_account_id and user.squad_provisioned:
+            logger.info("squad_va_already_provisioned", user_id=user.id)
+            return {
+                "squad_account_id": user.squad_account_id,
+                "account_number": user.squad_account_number,
+                "bank": user.squad_account_bank,
+            }
+
+        display_name = (
+            user.full_name
+            or user.business_name
+            or user.company_name
+            or user.first_name
+            or "User"
+        )
+
+        payload = {
+            "email": f"{user.id}@zovu.internal",
+            "first_name": display_name,
+            "last_name": "Zovu",
+            "mobile_num": "",
+            "bvn": "",
+            "is_permanent": True,
+            "customer_identifier": str(user.id),
+        }
+
+        logger.info("squad_create_va_start", user_id=user.id)
+
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/virtual-accounts",
-                    json={
-                        "business_name": "Zovu",
-                        "customer_email": email,
-                        "customer_phone": phone,
-                        "is_individual": True,
-                    },
-                    headers=self._get_squad_headers(),
-                    timeout=10,
-                )
-                
-                if response.status_code not in [200, 201]:
-                    logger.error("squad_virtual_account_failed", status=response.status_code)
-                    raise ExternalServiceError("Squad", f"Failed to create virtual account")
-                
-                data = response.json()
-                logger.info(
-                    "squad_virtual_account_created",
-                    user_id=user_id,
-                    squad_id=data.get("id"),
-                )
-                
-                return {
-                    "squad_id": data.get("id"),
-                    "account_number": data.get("account_number"),
-                    "bank_name": data.get("bank_name"),
-                }
-        except httpx.RequestError as e:
-            logger.error("squad_request_error", error=str(e))
-            raise ExternalServiceError("Squad", "Network error")
-    
-    async def initiate_transfer(
+            data = await self._post_with_retry("/virtual-account", payload)
+        except Exception as exc:
+            logger.error("squad_create_va_failed", user_id=user.id, error=str(exc))
+            raise ExternalServiceError("Squad", "Failed to create virtual account")
+
+        va_data = data.get("data", data)
+        account_number = va_data.get("virtual_account_number") or va_data.get("account_number")
+        bank = va_data.get("bank_name") or va_data.get("bank") or "Access Bank"
+        squad_id = va_data.get("id") or va_data.get("virtual_account_id")
+
+        user.squad_account_id = squad_id
+        user.squad_account_number = account_number
+        user.squad_account_bank = bank
+        user.squad_provisioned = True
+        user.squad_virtual_account_id = squad_id  # keep legacy field in sync
+
+        await self.db.commit()
+
+        logger.info(
+            "squad_va_created",
+            user_id=user.id,
+            account_number=account_number,
+            bank=bank,
+        )
+
+        return {
+            "squad_account_id": squad_id,
+            "account_number": account_number,
+            "bank": bank,
+        }
+
+    # ------------------------------------------------------------------ #
+    #  Transfers                                                           #
+    # ------------------------------------------------------------------ #
+
+    async def transfer_funds(
         self,
-        amount: int,
         recipient_account: str,
-        recipient_bank_code: str,
+        amount_kobo: int,
         reference: str,
-        narration: str = "Zovu transfer",
+        narration: str,
     ) -> dict:
         """
-        Initiate transfer via Squad API.
-        Amount in KOBO.
-        
-        Args:
-            amount: Amount in KOBO
-            recipient_account: Recipient bank account number
-            recipient_bank_code: Recipient bank code
-            reference: Transaction reference
-            narration: Transaction narration
-            
-        Returns:
-            dict with squad_transaction_id
-            
-        Raises:
-            ExternalServiceError: If Squad API call fails
+        Initiate a transfer. Amount in KOBO (converted to naira for Squad).
+        Reference must be unique — caller should use f"zovu-{uuid4().hex}".
         """
-        # Convert KOBO to NAIRA for Squad API
-        amount_naira = amount / 100
-        
+        amount_naira = amount_kobo / 100
+
         logger.info(
-            "squad_transfer_initiated",
-            amount=amount_naira,
-            recipient_account=recipient_account,
+            "squad_transfer_start",
+            recipient=recipient_account,
+            amount_naira=amount_naira,
             reference=reference,
         )
-        
+
+        payload = {
+            "transaction_reference": reference,
+            "amount": amount_naira,
+            "bank_code": "",
+            "account_number": recipient_account,
+            "account_name": "",
+            "narration": narration,
+            "currency_id": "NGN",
+        }
+
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/transfers",
-                    json={
-                        "amount": amount_naira,
-                        "recipient_account": recipient_account,
-                        "recipient_bank_code": recipient_bank_code,
-                        "reference": reference,
-                        "narration": narration,
-                    },
-                    headers=self._get_squad_headers(),
-                    timeout=30,
-                )
-                
-                if response.status_code not in [200, 201]:
-                    logger.error(
-                        "squad_transfer_failed",
-                        status=response.status_code,
-                        response=response.text,
-                    )
-                    raise ExternalServiceError("Squad", "Transfer initiation failed")
-                
-                data = response.json()
-                logger.info(
-                    "squad_transfer_successful",
-                    squad_transaction_id=data.get("id"),
-                )
-                
-                return {
-                    "squad_transaction_id": data.get("id"),
-                    "status": data.get("status"),
-                }
-        except httpx.RequestError as e:
-            logger.error("squad_transfer_request_error", error=str(e))
-            raise ExternalServiceError("Squad", "Network error")
-    
-    async def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
-        """
-        Verify Squad webhook signature using HMAC-SHA512.
-        CRITICAL: Must verify before processing webhook.
-        
-        Args:
-            payload: Raw request body
-            signature: X-SquadCo-Signature header value
-            
-        Returns:
-            bool: True if signature valid
-        """
-        expected_signature = hmac.new(
+            data = await self._post_with_retry("/payout/transfer", payload)
+        except Exception as exc:
+            logger.error("squad_transfer_failed", reference=reference, error=str(exc))
+            raise ExternalServiceError("Squad", "Transfer initiation failed")
+
+        return {
+            "squad_transaction_id": data.get("data", {}).get("transaction_ref", reference),
+            "status": data.get("data", {}).get("status", "pending"),
+        }
+
+    # ------------------------------------------------------------------ #
+    #  Webhook                                                             #
+    # ------------------------------------------------------------------ #
+
+    def verify_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
+        """HMAC-SHA512 using SQUAD_SECRET_KEY. Returns True if valid."""
+        expected = hmac.new(
             self.secret_key.encode(),
-            payload,
+            payload_bytes,
             hashlib.sha512,
         ).hexdigest()
-        
-        is_valid = hmac.compare_digest(expected_signature, signature)
-        
+
+        is_valid = hmac.compare_digest(expected.upper(), signature.upper())
+
         if not is_valid:
-            logger.warning("webhook_signature_verification_failed", signature=signature)
-        else:
-            logger.info("webhook_signature_verified")
-        
+            logger.warning("webhook_signature_invalid")
+
         return is_valid
-    
+
     async def handle_webhook(self, webhook_data: dict) -> dict:
         """
-        Handle Squad webhook with idempotency.
-        CRITICAL: Check idempotency via Redis atomic SET (nx=True).
-        
-        Args:
-            webhook_data: Webhook payload
-            
-        Returns:
-            dict with processing result
-            
-        Raises:
-            ValidationError: If webhook already processed
+        Handle Squad webhook with Redis idempotency (atomic SET nx=True).
         """
-        webhook_id = webhook_data.get("id")
-        event_type = webhook_data.get("event_type")
-        
-        if not webhook_id or not event_type:
-            logger.warning("webhook_missing_fields")
-            raise ValidationError("Missing webhook fields")
-        
-        logger.info("webhook_received", webhook_id=webhook_id, event_type=event_type)
-        
-        # IDEMPOTENCY CHECK: Atomic Redis SET with nx=True + 24hr expiry
+        webhook_id = webhook_data.get("id") or webhook_data.get("transaction_ref")
+        event_type = webhook_data.get("event") or webhook_data.get("event_type", "unknown")
+
+        if not webhook_id:
+            raise ValidationError("Missing webhook id")
+
         idempotency_key = f"squad_webhook:{webhook_id}"
-        was_new = await self.redis.set(
-            idempotency_key,
-            "1",
-            nx=True,  # Only set if not exists
-            ex=86400,  # 24 hours
-        )
-        
+        was_new = await self.redis.set(idempotency_key, "1", nx=True, ex=86400)
+
         if not was_new:
             logger.info("webhook_already_processed", webhook_id=webhook_id)
-            raise ValidationError("Webhook already processed")
-        
-        # Log webhook for audit trail
+            return {"webhook_id": webhook_id, "status": "already_processed"}
+
         webhook_log = SquadWebhookLog(
             webhook_id=webhook_id,
             event_type=event_type,
@@ -225,23 +186,39 @@ class SquadService:
         )
         self.db.add(webhook_log)
         await self.db.commit()
-        
-        logger.info("webhook_logged", webhook_id=webhook_id)
-        
-        # Dispatch to async task (Celery) for actual processing
-        # In production, this is where you'd call:
-        # from src.workers.squad_tasks import process_squad_webhook_async
-        # process_squad_webhook_async.delay(webhook_id, event_type, webhook_data)
-        
+
+        logger.info("webhook_logged", webhook_id=webhook_id, event_type=event_type)
+
+        return {"webhook_id": webhook_id, "status": "received", "async": True}
+
+    # ------------------------------------------------------------------ #
+    #  Internal helpers                                                    #
+    # ------------------------------------------------------------------ #
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    async def _post_with_retry(self, path: str, payload: dict) -> dict:
+        """POST to Squad with tenacity retry (3 attempts, exponential backoff)."""
+        url = f"{self.base_url}{path}"
+        response = await self.http.post(url, json=payload, headers=self._headers())
+
+        if response.status_code not in (200, 201):
+            logger.error(
+                "squad_api_error",
+                url=url,
+                status=response.status_code,
+                body=response.text[:200],
+            )
+            response.raise_for_status()
+
+        return response.json()
+
+    def _headers(self) -> dict:
         return {
-            "webhook_id": webhook_id,
-            "status": "received",
-            "async": True,  # Processing happens async
-        }
-    
-    def _get_squad_headers(self) -> dict:
-        """Get Squad API headers with authentication."""
-        return {
-            "Authorization": f"Bearer {settings.SQUAD_SECRET_KEY}",
+            "Authorization": f"Bearer {self.secret_key}",
             "Content-Type": "application/json",
         }

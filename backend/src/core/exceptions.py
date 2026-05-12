@@ -88,3 +88,21 @@ class UserFrozenError(ZovuException):
     
     def __init__(self, detail: str = "Account frozen"):
         super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+class ZovuAPIError(ZovuException):
+    """
+    Structured API error that maps to the response envelope format:
+    { "ok": false, "error": { "code": "...", "message": "...", "field": null } }
+    """
+    
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        field: Optional[str] = None,
+    ):
+        self.error_code = code
+        self.error_field = field
+        super().__init__(status_code=status_code, detail=message)
