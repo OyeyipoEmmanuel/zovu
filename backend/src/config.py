@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     # Squad API Configuration
     SQUAD_SECRET_KEY: str
+    SQUAD_PUBLIC_KEY: str
     SQUAD_BASE_URL: str  # https://sandbox-api-d.squadco.com (dev) or https://api-d.squadco.com (prod)
     SQUAD_WEBHOOK_IP: str = ""  # Optional IP whitelist for Squad webhooks
     
@@ -41,6 +42,14 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ALLOWED_ORIGINS: str = "http://localhost:5173"  # comma-separated
     SENTRY_DSN: str = ""
+    PORT: int = 4000
+
+    EMAIL_PROVIDER: str = "smtp"
+    SMTP_HOST: str
+    SMTP_PORT: int
+    FROM_EMAIL: str
+    FROM_NAME: str
+    CELERY_BROKER_URL: str
     
     class Config:
         env_file = ".env"
