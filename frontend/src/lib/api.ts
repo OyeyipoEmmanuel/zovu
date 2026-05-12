@@ -18,7 +18,7 @@ import {
   type VirtualAccount,
   type UserProfile,
 } from './mockData';
-import type { LenderStats, AnonymisedBorrower, FullBorrowerProfile, LoanRecord } from '../types/lender';
+import type { LenderStats, AnonymisedBorrower, FullBorrowerProfile } from '../types/lender';
 
 export interface MyLoanRecord {
   borrower_name: string;
