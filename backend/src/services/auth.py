@@ -4,7 +4,7 @@ All tokens are JWT (RS256). Refresh tokens are family-rotated for security.
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from src.models import User, OTP, RefreshToken, UserRole, UserStatus
+from src.models import User, OTP, RefreshToken, UserType, UserStatus
 from src.core.security import (
     hash_password,
     verify_password,
@@ -359,7 +359,7 @@ class AuthService:
             logger.error("logout_failed", user_id=user_id, error=str(e))
             raise
     
-    async def _generate_tokens(self, user_id: str, role: UserRole) -> dict:
+    async def _generate_tokens(self, user_id: str, role: UserType) -> dict:
         """
         Generate new access and refresh token pair.
         
