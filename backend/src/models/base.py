@@ -3,11 +3,15 @@ SQLAlchemy ORM models with async support.
 All models use UUID primary keys and include proper indexes.
 Money amounts are ALWAYS stored in KOBO (integer) — never floats.
 """
+# pyrefly: ignore [missing-import]
 from sqlalchemy import (
     String, Integer, Float, Boolean, DateTime, Text, JSON, Enum as SQLEnum,
     ForeignKey, UniqueConstraint, Index, CheckConstraint, LargeBinary
 )
+
+# pyrefly: ignore [missing-import]
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
 # pyrefly: ignore [missing-import]
 from sqlalchemy.sql import func
@@ -19,10 +23,10 @@ Base = declarative_base()
 
 
 # Enums
-class UserRole(str, Enum):
-    """User role enumeration."""
-    USER = "user"
-    ADMIN = "admin"
+class UserType(str, Enum):
+    TRADER = "trader"
+    SEEKER = "seeker"
+    BOTH = "both"
 
 
 class UserStatus(str, Enum):
@@ -57,6 +61,54 @@ class AjoStatus(str, Enum):
     CLOSED = "closed"
 
 
+# new set of enums for market place and gigs
+
+class BusinessType(str, Enum):
+    WHOLESALER = "wholesaler"
+    RETAILER = "retailer"
+    SMALL_KIOSK = "small_kiosk"
+    ONLINE_VENDOR = "online_vendor"
+    SERVICE_PROVIDER = "service_provider"
+
+
+class EmploymentType(str, Enum):
+    FULL_TIME = "full_time"
+    PART_TIME = "part_time"
+    SELF_EMPLOYED = "self_employed"
+    CONTRACT = "contract"
+
+class EconomicContext(str, Enum):
+    NORMAL = "normal"
+    HOLIDAY_RUSH = "holiday_rush"
+    RAINY_DAY = "rainy_day"
+    FUEL_SCARCITY = "fuel_scarcity"
+    MARKET_STRIKE = "market_strike"
+
+
+class ShieldStatus(str, Enum):
+    NONE = "none"
+    BRONZE = "bronze"
+    SILVER = "silver"
+    GOLD = "gold"
+
+
+class GigStatus(str, Enum):
+    OPEN = "open"
+    ASSIGNED = "assigned"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class WorkNeededType(str, Enum):
+    DELIVERY = "delivery"
+    SALES = "sales"
+    LOGISTICS = "logistics"
+    CLEANING = "cleaning"
+    DIGITAL = "digital"
+    SECURITY = "security"
+
+
 # Models
 class User(Base):
     """User account model."""
@@ -66,7 +118,10 @@ class User(Base):
     phone: Mapped[bytes]  # Encrypted with Fernet
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(SQLEnum(UserRole), default=UserRole.USER)
+    user_type: Mapped[UserType] = mapped_column(
+        SQLEnum(UserType),
+        default=UserType.SEEKER
+    )
     status: Mapped[UserStatus] = mapped_column(SQLEnum(UserStatus), default=UserStatus.ACTIVE)
     
     # KYC fields (encrypted)
@@ -80,6 +135,58 @@ class User(Base):
     profile_photo_url: Mapped[str | None] = mapped_column(String(500))
     bio: Mapped[str | None] = mapped_column(Text)
     
+    # i added this for the users who want to trade
+    # Marketplace identity
+    business_name: Mapped[str | None] = mapped_column(String(255))
+    business_type: Mapped[BusinessType | None] = mapped_column(SQLEnum(BusinessType))
+    work_needed_type: Mapped[WorkNeededType | None] = mapped_column(SQLEnum(WorkNeededType))
+    location: Mapped[str | None] = mapped_column(String(255))
+    primary_language: Mapped[str | None] = mapped_column(String(50))
+
+    # Seeker profile
+    skills_list: Mapped[list | None] = mapped_column(JSON)
+    languages_spoken: Mapped[list | None] = mapped_column(JSON)
+
+    # Behavioral scoring
+    sales_consistency: Mapped[float] = mapped_column(Float, default=0.0)
+    ajo_discipline: Mapped[float] = mapped_column(Float, default=0.0)
+    repayment_punctuality: Mapped[float] = mapped_column(Float, default=0.0)
+    trust_score: Mapped[float] = mapped_column(Float, default=0.0)
+    punctuality_index: Mapped[float] = mapped_column(Float, default=0.0)
+    completion_rate: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Revenue analytics
+    average_daily_revenue: Mapped[int] = mapped_column(Integer, default=0)
+    average_monthly_revenue: Mapped[int] = mapped_column(Integer, default=0)
+    total_earned_to_date: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Credit analytics
+    max_credit_limit: Mapped[int] = mapped_column(Integer, default=0)
+    current_debt_balance: Mapped[int] = mapped_column(Integer, default=0)
+    max_advance_limit: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Savings
+    ajo_savings_balance: Mapped[int] = mapped_column(Integer, default=0)
+    auto_save_pct: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Protection
+    shield_status: Mapped[ShieldStatus] = mapped_column(
+        SQLEnum(ShieldStatus),
+        default=ShieldStatus.NONE
+    )
+
+    # ADD GIG RELATIONSHIPS TO USER MODEL
+    gigs_created = relationship(
+        "Gig",
+        foreign_keys="Gig.trader_id"
+    )
+
+
+    gigs_taken = relationship(
+        "Gig",
+        foreign_keys="Gig.seeker_id"
+    )
+
     # Compliance
     kyc_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     compliance_flags: Mapped[list | None] = mapped_column(JSON)  # Array of compliance issues
@@ -245,6 +352,11 @@ class Transaction(Base):
     transaction_type: Mapped[TransactionType] = mapped_column(SQLEnum(TransactionType))
     amount: Mapped[int] = mapped_column(Integer)  # KOBO
     squad_reference: Mapped[str | None] = mapped_column(String(100))
+
+    # is this compulsory 
+    direction: Mapped[str] = mapped_column(String(20))
+
+    method: Mapped[str | None] = mapped_column(String(50))
     status: Mapped[str] = mapped_column(String(50))  # pending | completed | failed
     tx_metadata: Mapped[dict | None] = mapped_column(JSON, name='metadata')
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -253,6 +365,15 @@ class Transaction(Base):
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_transactions")
     receiver = relationship("User", foreign_keys=[receiver_id], back_populates="received_transactions")
     loan = relationship("Loan", back_populates="transactions")
+
+    # UPGRADE TRANSACTION MODEL
+    amount_gross: Mapped[int | None] = mapped_column(Integer)
+    squad_fee: Mapped[int | None] = mapped_column(Integer)
+    method: Mapped[str | None] = mapped_column(String(50))
+
+    economic_context: Mapped[EconomicContext | None] = mapped_column(
+        SQLEnum(EconomicContext)
+    )
     
     __table_args__ = (
         Index("ix_transactions_sender_id", "sender_id"),
@@ -284,6 +405,71 @@ class Job(Base):
         Index("ix_jobs_user_id", "user_id"),
     )
 
+# the gig class i just added
+class Gig(Base):
+    """Marketplace gigs between traders and seekers."""
+
+    __tablename__ = "gigs"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4())
+    )
+
+    trader_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="CASCADE")
+    )
+
+    seeker_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text)
+
+    skill_required: Mapped[str] = mapped_column(String(255))
+
+    location: Mapped[str] = mapped_column(String(255))
+
+    economic_context: Mapped[EconomicContext] = mapped_column(
+        SQLEnum(EconomicContext),
+        default=EconomicContext.NORMAL
+    )
+
+    amount: Mapped[int] = mapped_column(Integer)
+
+    status: Mapped[GigStatus] = mapped_column(
+        SQLEnum(GigStatus),
+        default=GigStatus.OPEN
+    )
+
+    trader_rating: Mapped[int | None] = mapped_column(Integer)
+    seeker_rating: Mapped[int | None] = mapped_column(Integer)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    accepted_at: Mapped[datetime | None]
+    completed_at: Mapped[datetime | None]
+    cancelled_at: Mapped[datetime | None]
+
+    __table_args__ = (
+        Index("ix_gigs_trader_id", "trader_id"),
+        Index("ix_gigs_seeker_id", "seeker_id"),
+        Index("ix_gigs_status", "status"),
+        Index("ix_gigs_location", "location"),
+    )
 
 class Ajo(Base):
     """Ajo savings group model."""
@@ -393,3 +579,5 @@ class SquadWebhookLog(Base):
     __table_args__ = (
         Index("ix_squad_webhook_logs_webhook_id", "webhook_id"),
     )
+
+
