@@ -7,6 +7,10 @@ import {
   mockPulseHistory,
   mockGigs,
   mockRecentPayments,
+  mockLenderStats,
+  mockBorrowers,
+  mockFullBorrower,
+  mockMyLoans,
   type Transaction,
   type PulseSignal,
   type PulseHistoryPoint,
@@ -14,6 +18,43 @@ import {
   type VirtualAccount,
   type UserProfile,
 } from './mockData';
+import type { LenderStats, AnonymisedBorrower, FullBorrowerProfile, LoanRecord } from '../types/lender';
+
+export interface MyLoanRecord {
+  borrower_name: string;
+  amount: number;
+  disbursed_at: string;
+  repayment_days: number;
+  due_date: string;
+  amount_repaid: number;
+  total_repayment: number;
+  status: 'active' | 'repaid' | 'overdue';
+  transaction_ref: string;
+}
+
+export interface MyLoanStats {
+  total_disbursed: number;
+  active_loans: number;
+  recovered: number;
+}
+
+export interface MyLoanRecord {
+  borrower_name: string;
+  amount: number;
+  disbursed_at: string;
+  repayment_days: number;
+  due_date: string;
+  amount_repaid: number;
+  total_repayment: number;
+  status: 'active' | 'repaid' | 'overdue';
+  transaction_ref: string;
+}
+
+export interface MyLoanStats {
+  total_disbursed: number;
+  active_loans: number;
+  recovered: number;
+}
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
 
@@ -194,6 +235,144 @@ export const fetchMyApplications = async (): Promise<any[]> => {
     return [];
   }
   return request('/loans/my-applications');
+};
+
+export const lenderProfileAPI = {
+  step1: (payload: {
+    organization_name: string
+    account_type: 'individual' | 'microfinance' | 'cooperative' | 'fintech'
+    phone: string
+  }) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/lender/profile/step1', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  step2Individual: (payload: {
+    bvn: string
+    nin: string
+    dob: string
+    gender: '1' | '2'
+  }) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/lender/profile/step2', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  step2Organization: (payload: {
+    cac_number: string
+    organization_bvn: string
+    year_established: number
+  }) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/lender/profile/step2', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  step3: (payload: {
+    bank_name: string
+    account_number: string
+    account_name: string
+    min_lending_amount: number
+    max_lending_amount: number
+    preferred_tiers: string[]
+    preferred_lgas: string[]
+  }) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/lender/profile/step3', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  getStatus: () => {
+    if (USE_MOCK) {
+      return delay(500).then(() => ({ verified: false, current_step: 1 }));
+    }
+    return request<{ verified: boolean, current_step: 1 | 2 | 3 | 'complete' }>('/api/lender/profile/status');
+  }
+};
+
+// ─── Lender ──────────────────────────────────────────────────
+export const lenderAPI = {
+  getStats: async (): Promise<LenderStats> => {
+    if (USE_MOCK) {
+      await delay(500);
+      return mockLenderStats;
+    }
+    return request<LenderStats>('/api/lender/stats');
+  },
+
+  getBorrowers: async (filters?: {
+    minScore?: number
+    tier?: string
+    lga?: string
+    minAmount?: number
+    maxAmount?: number
+    limit?: number
+    page?: number
+  }): Promise<AnonymisedBorrower[]> => {
+    if (USE_MOCK) {
+      await delay(500);
+      let res = [...mockBorrowers];
+      if (filters?.minScore) res = res.filter(b => b.pulse_score >= filters.minScore!);
+      if (filters?.tier && filters.tier !== 'All') res = res.filter(b => b.tier === filters.tier);
+      if (filters?.lga) res = res.filter(b => b.lga === filters.lga);
+      if (filters?.minAmount) res = res.filter(b => b.loan_amount_requested >= filters.minAmount!);
+      if (filters?.maxAmount) res = res.filter(b => b.loan_amount_requested <= filters.maxAmount!);
+      if (filters?.limit) res = res.slice(0, filters.limit);
+      return res as AnonymisedBorrower[];
+    }
+    const params = filters ? new URLSearchParams(filters as any).toString() : '';
+    return request<AnonymisedBorrower[]>(`/api/lender/borrowers${params ? '?' + params : ''}`);
+  },
+
+  getBorrowerById: async (id: string): Promise<FullBorrowerProfile> => {
+    if (USE_MOCK) {
+      await delay(500);
+      return mockFullBorrower as FullBorrowerProfile;
+    }
+    return request<FullBorrowerProfile>(`/api/lender/borrowers/${id}`);
+  },
+
+  disburse: async (payload: {
+    borrower_id: string
+    amount: number
+    repayment_days: number
+  }): Promise<{ success: boolean }> => {
+    if (USE_MOCK) {
+      await delay(1500);
+      return { success: true };
+    }
+    return request<{ success: boolean }>('/api/lender/disburse', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  getMyLoans: async (status?: 'active' | 'repaid' | 'overdue'): Promise<MyLoanRecord[]> => {
+    if (USE_MOCK) {
+      await delay(600);
+      let loans = [...mockMyLoans] as MyLoanRecord[];
+      if (status && status !== 'all' as any) {
+        loans = loans.filter(l => l.status === status);
+      }
+      return loans;
+    }
+    const params = status && status !== 'all' as any ? `?status=${status}` : '';
+    return request<MyLoanRecord[]>(`/api/lender/loans${params}`);
+  },
+
+  getLoanStats: async (): Promise<MyLoanStats> => {
+    if (USE_MOCK) {
+      await delay(400);
+      return {
+        total_disbursed: 4200000,
+        active_loans: 12,
+        recovered: 1850000,
+      };
+    }
+    return request<MyLoanStats>('/api/lender/loans/stats');
+  },
 };
 
 export { ApiError };

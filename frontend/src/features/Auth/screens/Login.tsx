@@ -11,6 +11,8 @@ import {
 } from '../components';
 import { loginSchema, type LoginFormData } from '../schemas';
 import { login, saveTokens } from '../../../services/authService';
+import { useAuthStore } from '../../../stores/authStore';
+import { mockUser } from '../../../lib/mockData';
 import { ApiError } from '../../../services/api';
 
 export const Login: React.FC = () => {
@@ -34,6 +36,17 @@ export const Login: React.FC = () => {
     try {
       const tokens = await login(data.email, data.password);
       saveTokens(tokens);
+
+      // Determine role based on email for testing purposes
+      const role = data.email.toLowerCase().includes('lender') ? 'Lender' : mockUser.role;
+
+      // Mock user initialization
+      useAuthStore.getState().setUser({
+        ...mockUser,
+        email: data.email,
+        role: role as 'Trader' | 'Job Seeker' | 'Lender' | 'Both',
+      });
+
       navigate('/dashboard');
     } catch (e: unknown) {
       setApiError(

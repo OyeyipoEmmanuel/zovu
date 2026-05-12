@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 export const personalInfoSchema = z.object({
-  role: z.enum(['Trader', 'Job Seeker', 'Both'], {
-    errorMap: () => ({ message: 'Please select a role' }),
+  role: z.enum(['Trader', 'Job Seeker', 'Both', 'Lender'], {
+    message: 'Please select a role',
   }),
   email: z
     .string()
@@ -18,7 +18,7 @@ export const personalInfoSchema = z.object({
   businessName: z.string().optional(),
 }).refine(
   (data) => {
-    if ((data.role === 'Trader' || data.role === 'Both') && (!data.businessName || data.businessName.trim() === '')) {
+    if ((data.role === 'Trader' || data.role === 'Both' || data.role === 'Lender') && (!data.businessName || data.businessName.trim() === '')) {
       return false;
     }
     return true;

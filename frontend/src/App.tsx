@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './stores/authStore';
+import { LenderRoutes } from './router';
 import { LandingPage } from './features/LandingPage';
 import {
   Login,
@@ -17,6 +19,13 @@ import {
   Step2Business,
   Step3Success,
 } from './features/trader';
+
+const DashboardRouter = () => {
+  const { user } = useAuthStore();
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === 'Lender') return <Navigate to="/dashboard/lender" replace />;
+  return <Navigate to="/dashboard/trader" replace />;
+};
 
 function App() {
   return (
@@ -41,8 +50,11 @@ function App() {
           </Route>
         </Route>
 
-        {/* Redirect /dashboard to trader dashboard */}
-        <Route path="/dashboard" element={<Navigate to="/dashboard/trader" replace />} />
+        {/* Lender Dashboard Routes */}
+        {LenderRoutes}
+
+        {/* Redirect /dashboard to appropriate dashboard based on role */}
+        <Route path="/dashboard" element={<DashboardRouter />} />
       </Routes>
     </BrowserRouter>
   );
