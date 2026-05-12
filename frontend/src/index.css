@@ -17,8 +17,6 @@
   
   --color-zovu-text: #A0A0A0;
   --color-zovu-text-light: #F5F5F5;
-
-  --animate-slide-in: slide-in 0.25s ease-out;
 }
 
 @layer base {
@@ -43,28 +41,4 @@
   h1, h2, h3, h4, h5, h6 {
     @apply font-syne text-zovu-text-light;
   }
-
-  /* Custom scrollbar for dashboard */
-  ::-webkit-scrollbar {
-    width: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #2A2A2A;
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #3A3A3A;
-  }
 }
-
-@keyframes slide-in {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(0);
-  }
-}

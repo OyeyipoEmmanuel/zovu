@@ -9,6 +9,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import declarative_base, Mapped, mapped_column, relationship
+# pyrefly: ignore [missing-import]
 from sqlalchemy.sql import func
 from datetime import datetime, timezone
 from enum import Enum
