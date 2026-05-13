@@ -211,7 +211,7 @@ export const DashboardHome: React.FC = () => {
       {/* Profile Completion Banner */}
       {!loading && profileCompletion < 100 && (
         <Link
-          to="/dashboard/trader/settings"
+          to="/dashboard/trader/complete-profile/kyc"
           className="bg-zovu-surface-1 border border-zovu-amber/20 rounded-[12px] p-4 flex items-center gap-4 hover:border-zovu-amber/40 transition-colors duration-200 group"
         >
           <div className="flex-1">

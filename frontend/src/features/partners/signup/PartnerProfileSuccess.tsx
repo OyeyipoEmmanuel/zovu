@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLenderStore } from '../../../stores/lenderStore';
+import { usePartnerStore } from '../../../stores/partnerStore';
 
-export const LenderProfileSuccess: React.FC = () => {
+export const PartnerProfileSuccess: React.FC = () => {
   const navigate = useNavigate();
-  const { setLenderVerified } = useLenderStore();
+  const { setLenderVerified } = usePartnerStore();
 
   useEffect(() => {
     // Lift the feature gates!
@@ -22,28 +22,28 @@ export const LenderProfileSuccess: React.FC = () => {
       </div>
 
       <h2 className="font-syne text-[28px] font-bold text-zovu-text-light">
-        ✓ You're verified as a Lender on Zovu
+        ✓ You're verified as a Partner on Zovu
       </h2>
 
       <p className="font-dm text-[16px] text-zovu-text max-w-md mx-auto leading-relaxed">
-        You can now browse verified borrowers, unlock profiles, and disburse loans directly to their Zovu Squad accounts.
+        You can now browse verified customers, unlock profiles, and offer financial services directly to their Zovu Squad accounts.
       </p>
 
       <div className="bg-zovu-surface-2 border border-zovu-border rounded-[12px] p-6 text-left w-full mt-4">
         <h3 className="font-syne text-[16px] font-bold text-zovu-text-light mb-3">What's next:</h3>
         <ul className="flex flex-col gap-3 font-dm text-[14px] text-zovu-text">
-          <li className="flex gap-2"><span>→</span> Browse the borrower pool</li>
+          <li className="flex gap-2"><span>→</span> Browse the customer pool</li>
           <li className="flex gap-2"><span>→</span> Filter by Pulse Score, tier, and location</li>
           <li className="flex gap-2"><span>→</span> Unlock a profile to see full details</li>
-          <li className="flex gap-2"><span>→</span> Disburse with one click via Squad</li>
+          <li className="flex gap-2"><span>→</span> Offer services with one click via Squad</li>
         </ul>
       </div>
 
       <button
-        onClick={() => navigate('/dashboard/lender/borrowers')}
+        onClick={() => navigate('/dashboard/partners/customers')}
         className="w-full mt-6 bg-zovu-primary text-zovu-primary-text font-dm font-bold text-[16px] py-4 rounded-[8px] hover:brightness-110 transition-all flex items-center justify-center gap-2"
       >
-        Go to Borrower Pool →
+        Go to Customer Pool →
       </button>
     </div>
   );

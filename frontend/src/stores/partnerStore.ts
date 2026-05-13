@@ -1,7 +1,20 @@
 import { create } from 'zustand'
 import type { AnonymisedBorrower, FullBorrowerProfile, LoanRecord, LenderStats } from '../types/lender'
 
-interface LenderStore {
+export interface PartnerProduct {
+  id: string
+  name: string
+  type: 'loan' | 'insurance' | 'savings'
+  description: string
+  min_pulse_score: number
+  max_amount?: number
+  interest_rate?: number
+  premium_amount?: number
+  repayment_days?: number
+  active_enrollments: number
+}
+
+interface PartnerStore {
   stats: LenderStats | null
   borrowers: AnonymisedBorrower[]
   selectedBorrower: FullBorrowerProfile | null
@@ -12,10 +25,11 @@ interface LenderStore {
     lga?: string
     minAmount?: number
     maxAmount?: number
+    productType?: 'loan' | 'insurance' | 'savings'
   }
   disbursing: boolean
   disburseSuccess: boolean
-  setFilters: (filters: Partial<LenderStore['filters']>) => void
+  setFilters: (filters: Partial<PartnerStore['filters']>) => void
   setSelectedBorrower: (borrower: FullBorrowerProfile | null) => void
   setDisbursing: (val: boolean) => void
   setDisburseSuccess: (val: boolean) => void
@@ -31,9 +45,14 @@ interface LenderStore {
   setCurrentProfileStep: (step: 1 | 2 | 3 | 'complete') => void
   setAccountType: (type: string) => void
   setOrganizationName: (name: string) => void
+
+  partnerType: 'microfinance' | 'insurance' | 'cooperative' | 'fintech' | 'individual' | null
+  products: PartnerProduct[]
+  setPartnerType: (type: string) => void
+  setProducts: (products: PartnerProduct[]) => void
 }
 
-export const useLenderStore = create<LenderStore>((set) => ({
+export const usePartnerStore = create<PartnerStore>((set) => ({
   stats: null,
   borrowers: [],
   selectedBorrower: null,
@@ -57,4 +76,9 @@ export const useLenderStore = create<LenderStore>((set) => ({
   setCurrentProfileStep: (step) => set({ currentProfileStep: step }),
   setAccountType: (type) => set({ accountType: type as any }),
   setOrganizationName: (name) => set({ organizationName: name }),
+
+  partnerType: null,
+  products: [],
+  setPartnerType: (type) => set({ partnerType: type as any }),
+  setProducts: (products) => set({ products }),
 }))

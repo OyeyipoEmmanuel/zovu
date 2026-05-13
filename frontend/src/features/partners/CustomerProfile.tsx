@@ -1,16 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useLenderStore } from '../../stores/lenderStore';
-import { lenderAPI } from '../../lib/api';
+import { usePartnerStore } from '../../stores/partnerStore';
+import { lenderAPI, partnerAPI } from '../../lib/api';
 import { FundConfirmationModal } from './FundConfirmationModal';
 
-export const BorrowerProfile: React.FC = () => {
+export const CustomerProfile: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { selectedBorrower, setSelectedBorrower, setDisburseSuccess, lenderVerified } = useLenderStore();
+  const { selectedBorrower, setSelectedBorrower, setDisburseSuccess, lenderVerified, partnerType } = usePartnerStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showInsuranceModal, setShowInsuranceModal] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrollSuccess, setEnrollSuccess] = useState(false);
 
   const loadBorrower = async () => {
     if (!id) return;
@@ -20,7 +23,7 @@ export const BorrowerProfile: React.FC = () => {
       const data = await lenderAPI.getBorrowerById(id);
       setSelectedBorrower(data);
     } catch (err) {
-      setError('Failed to fetch borrower details');
+      setError('Failed to fetch customer details');
     } finally {
       setLoading(false);
     }
@@ -51,6 +54,30 @@ export const BorrowerProfile: React.FC = () => {
     }
   };
 
+  const isInsurancePartner = partnerType === 'insurance';
+
+  const handleOfferService = () => {
+    if (isInsurancePartner) {
+      setShowInsuranceModal(true);
+    } else {
+      setDisburseSuccess(false);
+      setShowModal(true);
+    }
+  };
+
+  const handleEnrollConfirm = async () => {
+    if (!id) return;
+    setEnrolling(true);
+    try {
+      await partnerAPI.enroll({ customer_id: id, product_id: 'p002' });
+      setEnrollSuccess(true);
+    } catch (err) {
+      // handle error
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col gap-6 animate-pulse p-4 md:p-8 max-w-4xl mx-auto w-full">
@@ -73,8 +100,8 @@ export const BorrowerProfile: React.FC = () => {
     return (
       <div className="p-4 md:p-8 max-w-4xl mx-auto w-full">
         <div className="bg-red-500/10 border border-red-500/20 p-6 rounded-[12px] text-center">
-          <p className="text-red-400 font-dm mb-4">{error || 'Borrower not found'}</p>
-          <button onClick={() => navigate('/dashboard/lender/borrowers')} className="px-4 py-2 bg-zovu-surface-2 text-zovu-text-light rounded-md font-dm">
+          <p className="text-red-400 font-dm mb-4">{error || 'Customer not found'}</p>
+          <button onClick={() => navigate('/dashboard/partners/customers')} className="px-4 py-2 bg-zovu-surface-2 text-zovu-text-light rounded-md font-dm">
             Back to Pool
           </button>
         </div>
@@ -113,11 +140,11 @@ export const BorrowerProfile: React.FC = () => {
           <div className="flex gap-3 items-center">
             <span className="text-[24px]">🔒</span>
             <p className="font-dm text-[15px] text-[#F4A11D]">
-              Complete your lender profile to disburse loans.
+              Complete your partner profile to offer services.
             </p>
           </div>
           <button
-            onClick={() => navigate('/dashboard/lender/complete-profile')}
+            onClick={() => navigate('/dashboard/partners/complete-profile')}
             className="px-6 py-2.5 bg-[#F4A11D] text-[#0D0D0D] font-dm text-[14px] font-bold rounded-[8px] hover:brightness-110 whitespace-nowrap"
           >
             Complete Profile →
@@ -183,7 +210,7 @@ export const BorrowerProfile: React.FC = () => {
         {/* Loan Request Details */}
         <div className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6 flex flex-col justify-between">
           <div>
-            <h3 className="font-syne text-[18px] font-bold text-zovu-text-light mb-4">Loan Request</h3>
+            <h3 className="font-syne text-[18px] font-bold text-zovu-text-light mb-4">Service Request</h3>
             <div className="flex flex-col gap-4">
               <div>
                 <p className="font-dm text-[13px] text-zovu-text mb-1">Amount</p>
@@ -249,18 +276,81 @@ export const BorrowerProfile: React.FC = () => {
         <div className="max-w-4xl mx-auto w-full">
           <button 
             disabled={!lenderVerified}
-            onClick={() => {
-              setDisburseSuccess(false);
-              setShowModal(true);
-            }}
+            onClick={handleOfferService}
             className="w-full bg-zovu-primary text-zovu-primary-text font-dm font-bold text-[16px] py-4 rounded-[12px] hover:brightness-110 transition-all shadow-[0_0_20px_rgba(26,107,74,0.3)] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {lenderVerified ? 'Fund This Borrower' : 'Complete Profile to Fund'}
+            {lenderVerified ? 'Offer Service' : 'Complete Profile to Offer Services'}
           </button>
         </div>
       </div>
 
       {showModal && <FundConfirmationModal onClose={() => setShowModal(false)} />}
+
+      {/* Insurance Enrollment Modal */}
+      {showInsuranceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6 sm:p-8 max-w-md w-full">
+            {enrollSuccess ? (
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="w-14 h-14 rounded-full bg-zovu-primary/20 flex items-center justify-center text-[28px]">✓</div>
+                <h3 className="font-syne text-[20px] font-bold text-zovu-text-light">Enrollment Confirmed</h3>
+                <p className="font-dm text-[14px] text-zovu-text">Insurance enrollment has been processed successfully.</p>
+                <button
+                  onClick={() => { setShowInsuranceModal(false); setEnrollSuccess(false); }}
+                  className="w-full mt-2 py-3 bg-zovu-primary text-zovu-primary-text font-dm font-bold text-[15px] rounded-[8px]"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                <h3 className="font-syne text-[20px] font-bold text-zovu-text-light mb-6">Confirm Insurance Enrollment</h3>
+                <div className="flex flex-col gap-4 mb-6">
+                  <div className="flex justify-between font-dm text-[14px]">
+                    <span className="text-zovu-text">Customer:</span>
+                    <span className="text-zovu-text-light font-medium">{b.full_name}</span>
+                  </div>
+                  <div className="flex justify-between font-dm text-[14px]">
+                    <span className="text-zovu-text">Product:</span>
+                    <span className="text-zovu-text-light font-medium">Zovu Shield Silver</span>
+                  </div>
+                  <div className="flex justify-between font-dm text-[14px]">
+                    <span className="text-zovu-text">Premium:</span>
+                    <span className="text-zovu-text-light font-medium">₦800/month</span>
+                  </div>
+                  <div className="flex justify-between font-dm text-[14px]">
+                    <span className="text-zovu-text">Coverage:</span>
+                    <span className="text-zovu-text-light font-medium">Asset protection up to ₦200,000</span>
+                  </div>
+                  <div className="flex justify-between font-dm text-[14px]">
+                    <span className="text-zovu-text">Deduction:</span>
+                    <span className="text-zovu-text-light font-medium">Automatic monthly via Squad</span>
+                  </div>
+                </div>
+                <p className="font-dm text-[13px] text-zovu-text mb-6 text-center">
+                  Squad will deduct ₦800 from the customer's Zovu account on the 1st of every month.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowInsuranceModal(false)}
+                    className="flex-1 py-3 bg-zovu-surface-2 text-zovu-text-light font-dm font-medium text-[14px] rounded-[8px] border border-zovu-border"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleEnrollConfirm}
+                    disabled={enrolling}
+                    className="flex-1 py-3 bg-zovu-primary text-zovu-primary-text font-dm font-bold text-[14px] rounded-[8px] hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {enrolling && <div className="w-4 h-4 border-2 border-zovu-primary-text/30 border-t-zovu-primary-text rounded-full animate-spin" />}
+                    {enrolling ? 'Processing...' : 'Confirm Enrollment →'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

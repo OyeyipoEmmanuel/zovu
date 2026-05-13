@@ -1,23 +1,24 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLenderStore } from '../../../stores/lenderStore';
+import { usePartnerStore } from '../../../stores/partnerStore';
 import { lenderProfileAPI } from '../../../lib/api';
 
-export const LenderStep1Account: React.FC = () => {
+export const PartnerStep1Account: React.FC = () => {
   const navigate = useNavigate();
-  const { setAccountType, setOrganizationName, setCurrentProfileStep } = useLenderStore();
+  const { setAccountType, setOrganizationName, setCurrentProfileStep, setPartnerType } = usePartnerStore();
 
   const [name, setName] = useState('');
-  const [type, setType] = useState<'individual' | 'microfinance' | 'cooperative' | 'fintech' | ''>('');
+  const [type, setType] = useState<'microfinance' | 'insurance' | 'cooperative' | 'fintech' | 'individual' | ''>('');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const accountTypes = [
-    { id: 'individual', label: 'Individual Lender' },
-    { id: 'microfinance', label: 'Microfinance Bank' },
-    { id: 'cooperative', label: 'Cooperative Society' },
-    { id: 'fintech', label: 'Fintech' },
+    { id: 'microfinance', label: 'Microfinance Bank', description: 'Offer loans to verified Zovu users' },
+    { id: 'insurance', label: 'Insurance Provider', description: 'Offer insurance products to Zovu users' },
+    { id: 'cooperative', label: 'Cooperative Society', description: 'Offer loans and savings to members' },
+    { id: 'fintech', label: 'Fintech', description: 'Offer digital financial products' },
+    { id: 'individual', label: 'Individual Lender', description: 'Lend directly to verified borrowers' },
   ] as const;
 
   const isValid = name.trim().length > 0 && type !== '' && phone.trim().length === 11 && /^\d+$/.test(phone);
@@ -32,14 +33,15 @@ export const LenderStep1Account: React.FC = () => {
     try {
       await lenderProfileAPI.step1({
         organization_name: name,
-        account_type: type as 'individual' | 'microfinance' | 'cooperative' | 'fintech',
+        account_type: type as any,
         phone,
       });
 
       setAccountType(type);
+      setPartnerType(type);
       setOrganizationName(name);
       setCurrentProfileStep(2);
-      navigate('/dashboard/lender/complete-profile/identity');
+      navigate('/dashboard/partners/complete-profile/identity');
     } catch (err: any) {
       setError(err.message || 'Failed to submit profile. Please try again.');
     } finally {
@@ -67,20 +69,25 @@ export const LenderStep1Account: React.FC = () => {
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="font-dm text-[14px] text-zovu-text-light font-medium">Account Type</label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="font-dm text-[14px] text-zovu-text-light font-medium">Partner Type</label>
+          <div className="grid grid-cols-1 gap-3">
             {accountTypes.map((opt) => (
               <button
                 key={opt.id}
                 type="button"
                 onClick={() => setType(opt.id)}
-                className={`py-3 px-4 rounded-[8px] border text-left font-dm text-[14px] transition-all ${
+                className={`py-3 px-4 rounded-[8px] border text-left transition-all ${
                   type === opt.id 
-                    ? 'bg-zovu-primary/10 border-zovu-primary text-zovu-primary' 
-                    : 'bg-zovu-surface-2 border-zovu-border text-zovu-text hover:border-zovu-text/30'
+                    ? 'bg-zovu-primary/10 border-zovu-primary' 
+                    : 'bg-zovu-surface-2 border-zovu-border hover:border-zovu-text/30'
                 }`}
               >
-                {opt.label}
+                <p className={`font-dm text-[14px] font-medium ${type === opt.id ? 'text-zovu-primary' : 'text-zovu-text-light'}`}>
+                  {opt.label}
+                </p>
+                <p className="font-dm text-[12px] text-zovu-text mt-0.5">
+                  {opt.description}
+                </p>
               </button>
             ))}
           </div>

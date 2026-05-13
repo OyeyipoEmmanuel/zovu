@@ -1,11 +1,11 @@
 import React from 'react';
-import { useLenderStore } from '../../stores/lenderStore';
+import { usePartnerStore } from '../../stores/partnerStore';
 import { lenderAPI } from '../../lib/api';
 
 export const FundConfirmationModal: React.FC<{
   onClose: () => void;
 }> = ({ onClose }) => {
-  const { selectedBorrower, disbursing, disburseSuccess, setDisbursing, setDisburseSuccess } = useLenderStore();
+  const { selectedBorrower, disbursing, disburseSuccess, setDisbursing, setDisburseSuccess } =  usePartnerStore();
 
   if (!selectedBorrower) return null;
 

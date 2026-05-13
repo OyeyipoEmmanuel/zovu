@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLenderStore } from '../../../stores/lenderStore';
+import { usePartnerStore } from '../../../stores/partnerStore';
 import { lenderProfileAPI } from '../../../lib/api';
 
-export const LenderStep2Identity: React.FC = () => {
+export const PartnerStep2Identity: React.FC = () => {
   const navigate = useNavigate();
-  const { accountType, setCurrentProfileStep } = useLenderStore();
+  const { accountType, setCurrentProfileStep } = usePartnerStore();
 
   const [bvn, setBvn] = useState('');
   const [bvnMasked, setBvnMasked] = useState(false);
@@ -63,7 +63,7 @@ export const LenderStep2Identity: React.FC = () => {
       }
 
       setCurrentProfileStep(3);
-      navigate('/dashboard/lender/complete-profile/funding');
+      navigate('/dashboard/partners/complete-profile/funding');
     } catch (err: any) {
       setError(err.message || 'Failed to verify identity. Please try again.');
     } finally {
@@ -223,7 +223,7 @@ export const LenderStep2Identity: React.FC = () => {
             type="button"
             onClick={() => {
               setCurrentProfileStep(1);
-              navigate('/dashboard/lender/complete-profile/account');
+              navigate('/dashboard/partners/complete-profile/account');
             }}
             className="flex-1 py-4 bg-zovu-surface-2 hover:bg-zovu-surface-2/80 text-zovu-text-light font-dm text-[15px] font-medium rounded-[8px] transition-colors border border-zovu-border"
           >

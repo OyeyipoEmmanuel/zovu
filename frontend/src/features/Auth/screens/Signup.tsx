@@ -20,7 +20,7 @@ import {
 const ROLE_OPTIONS: { value: UserRole; label: string; desc: string }[] = [
   { value: 'trader', label: 'Trader', desc: 'I sell goods or run a business' },
   { value: 'job_seeker', label: 'Job Seeker', desc: 'I am looking for work or gigs' },
-  { value: 'lender', label: 'Lender', desc: 'I want to fund micro-loans' },
+  { value: 'partner', label: 'Partner', desc: 'I want to provide financial services' },
 ];
 
 export const Signup: React.FC = () => {
@@ -28,7 +28,7 @@ export const Signup: React.FC = () => {
   const [searchParams] = useSearchParams();
 
   const rawRole = searchParams.get('role')?.toLowerCase().replace(' ', '_');
-  const initialRole = (['trader', 'job_seeker', 'lender'] as UserRole[]).includes(rawRole as UserRole)
+  const initialRole = (['trader', 'job_seeker', 'partner'] as UserRole[]).includes(rawRole as UserRole)
     ? (rawRole as UserRole)
     : undefined;
 
@@ -70,7 +70,7 @@ export const Signup: React.FC = () => {
         confirm_password: data.confirmPassword,
         ...(data.role === 'trader' && { business_name: data.business_name }),
         ...(data.role === 'job_seeker' && { full_name: data.full_name }),
-        ...(data.role === 'lender' && { company_name: data.company_name }),
+        ...(data.role === 'partner' && { company_name: data.company_name }),
       };
       const res = await registerUser(payload);
       setSavedFormData(data);
@@ -284,7 +284,7 @@ export const Signup: React.FC = () => {
             />
           </FormField>
         )}
-        {role === 'lender' && (
+        {role === 'partner' && (
           <FormField label="Company / Organization Name" id="company_name" error={errors.company_name}>
             <TextInput
               id="company_name"
