@@ -11,12 +11,28 @@ import {
   mockBorrowers,
   mockFullBorrower,
   mockMyLoans,
+  mockPartnerProducts,
+  mockPartnerStats,
+  mockInsuranceServices,
+  mockJobSeekerDashboard,
+  mockRecommendedJobs,
+  mockAllJobs,
+  mockJobSeekerGigHistory,
+  mockJobSeekerTransactions,
+  mockJobSeekerPulseSignals,
+  mockJobSeekerPulseHistory,
+  mockJobSeekerNotifications,
+  mockJobSeekerQR,
   type Transaction,
   type PulseSignal,
   type PulseHistoryPoint,
   type Gig,
   type VirtualAccount,
   type UserProfile,
+  type JobMatch,
+  type GigRecord,
+  type JSTransaction,
+  type JSNotification,
 } from './mockData';
 import type { LenderStats, AnonymisedBorrower, FullBorrowerProfile } from '../types/lender';
 
@@ -38,22 +54,21 @@ export interface MyLoanStats {
   recovered: number;
 }
 
-export interface MyLoanRecord {
-  borrower_name: string;
-  amount: number;
-  disbursed_at: string;
-  repayment_days: number;
-  due_date: string;
-  amount_repaid: number;
-  total_repayment: number;
-  status: 'active' | 'repaid' | 'overdue';
-  transaction_ref: string;
+export interface InsuranceServiceRecord {
+  id: string;
+  type: 'insurance';
+  customer_name: string;
+  product_name: string;
+  monthly_premium: number;
+  coverage_amount: number;
+  next_deduction: string;
+  status: 'active' | 'cancelled' | 'overdue';
 }
 
-export interface MyLoanStats {
+export interface PartnerStats {
   total_disbursed: number;
-  active_loans: number;
-  recovered: number;
+  active_services: number;
+  customers_served: number;
 }
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
@@ -240,7 +255,7 @@ export const fetchMyApplications = async (): Promise<any[]> => {
 export const lenderProfileAPI = {
   step1: (payload: {
     organization_name: string
-    account_type: 'individual' | 'microfinance' | 'cooperative' | 'fintech'
+    account_type: 'individual' | 'microfinance' | 'cooperative' | 'fintech' | 'insurance'
     phone: string
   }) => {
     if (USE_MOCK) {
@@ -372,6 +387,296 @@ export const lenderAPI = {
       };
     }
     return request<MyLoanStats>('/api/lender/loans/stats');
+  },
+};
+
+// ─── Partner ──────────────────────────────────────────────────
+export const partnerAPI = {
+  getMyProducts: async () => {
+    if (USE_MOCK) {
+      await delay(500);
+      return mockPartnerProducts;
+    }
+    return request('/api/partner/products');
+  },
+
+  addProduct: async (payload: {
+    name: string
+    type: 'loan' | 'insurance' | 'savings'
+    description: string
+    min_pulse_score: number
+    max_amount?: number
+    interest_rate?: number
+    premium_amount?: number
+    repayment_days?: number
+  }) => {
+    if (USE_MOCK) {
+      await delay(1000);
+      return { success: true };
+    }
+    return request('/api/partner/products', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  enroll: async (payload: {
+    customer_id: string
+    product_id: string
+  }) => {
+    if (USE_MOCK) {
+      await delay(1500);
+      return { success: true };
+    }
+    return request('/api/partner/enroll', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  getStats: async (): Promise<PartnerStats> => {
+    if (USE_MOCK) {
+      await delay(500);
+      return mockPartnerStats;
+    }
+    return request<PartnerStats>('/api/partner/stats');
+  },
+
+  getCustomers: async (filters?: {
+    minScore?: number
+    tier?: string
+    lga?: string
+    minAmount?: number
+    maxAmount?: number
+    productType?: 'loan' | 'insurance' | 'savings'
+    limit?: number
+    page?: number
+  }) => {
+    if (USE_MOCK) {
+      await delay(500);
+      let res = [...mockBorrowers];
+      if (filters?.minScore) res = res.filter(b => b.pulse_score >= filters.minScore!);
+      if (filters?.tier && filters.tier !== 'All') res = res.filter(b => b.tier === filters.tier);
+      if (filters?.lga) res = res.filter(b => b.lga === filters.lga);
+      if (filters?.minAmount) res = res.filter(b => b.loan_amount_requested >= filters.minAmount!);
+      if (filters?.maxAmount) res = res.filter(b => b.loan_amount_requested <= filters.maxAmount!);
+      if (filters?.limit) res = res.slice(0, filters.limit);
+      return res;
+    }
+    const params = filters ? new URLSearchParams(filters as any).toString() : '';
+    return request(`/api/partner/customers${params ? '?' + params : ''}`);
+  },
+
+  getCustomerById: async (id: string) => {
+    if (USE_MOCK) {
+      await delay(500);
+      return mockFullBorrower;
+    }
+    return request(`/api/partner/customers/${id}`);
+  },
+
+  disburse: async (payload: {
+    customer_id: string
+    amount: number
+    repayment_days: number
+  }) => {
+    if (USE_MOCK) {
+      await delay(1500);
+      return { success: true };
+    }
+    return request<{ success: boolean }>('/api/partner/disburse', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  getMyServices: async (type?: 'loan' | 'insurance' | 'savings' | 'overdue') => {
+    if (USE_MOCK) {
+      await delay(600);
+      const loanServices = (mockMyLoans as any[]).map(l => ({ ...l, type: 'loan' }));
+      const insuranceServices = (mockInsuranceServices as any[]);
+      let all = [...loanServices, ...insuranceServices];
+      if (type === 'loan') all = all.filter(s => s.type === 'loan');
+      else if (type === 'insurance') all = all.filter(s => s.type === 'insurance');
+      else if (type === 'savings') all = all.filter(s => s.type === 'savings');
+      else if (type === 'overdue') all = all.filter(s => s.status === 'overdue');
+      return all;
+    }
+    const params = type ? `?type=${type}` : '';
+    return request(`/api/partner/services${params}`);
+  },
+};
+
+export const jobSeekerOnboardingAPI = {
+  skills: (payload: {
+    skills: string[]
+    languages: string[]
+    primary_language: string
+  }) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/job-seeker/onboarding/skills', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  experience: (payload: {
+    years_of_experience: string
+    education_level: string
+    currently_employed: boolean
+    current_job_title?: string
+    current_employer?: string
+    work_history: {
+      job_title: string
+      employer?: string
+      type: 'full_time' | 'part_time' | 'gig' | 'apprenticeship'
+      duration: string
+    }[]
+  }) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/job-seeker/onboarding/experience', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  cv: (formData: FormData) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/job-seeker/onboarding/cv', {
+      method: 'POST',
+      body: formData,
+      // Note: Omit Content-Type to let browser set it with boundary for FormData
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+
+  preferences: (payload: {
+    availability: 'full_time' | 'part_time' | 'gig' | 'open'
+    preferred_lgas: string[]
+    willing_to_relocate: boolean
+    min_pay: number
+    pay_period: 'hour' | 'day' | 'week' | 'month' | 'gig'
+    auto_save_pct: number
+    emergency_contact_name: string
+    emergency_contact_phone: string
+  }) => {
+    if (USE_MOCK) {
+      return delay(1000).then(() => ({ success: true }));
+    }
+    return request('/api/job-seeker/onboarding/preferences', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  getStatus: () => {
+    if (USE_MOCK) {
+      return delay(500).then(() => ({ complete: false, current_step: 'skills' }));
+    }
+    return request<{ complete: boolean, current_step: 'skills' | 'experience' | 'cv' | 'preferences' | 'complete' }>('/api/job-seeker/onboarding/status');
+  }
+}
+
+// ─── Job Seeker Dashboard ───────────────────────────────────
+export const jobSeekerAPI = {
+  getDashboard: async () => {
+    if (USE_MOCK) {
+      await delay(500);
+      return mockJobSeekerDashboard;
+    }
+    return request('/api/job-seeker/dashboard');
+  },
+
+  getRecommendedJobs: async (): Promise<JobMatch[]> => {
+    if (USE_MOCK) {
+      await delay(500);
+      return mockRecommendedJobs;
+    }
+    return request<JobMatch[]>('/api/job-seeker/jobs/recommended');
+  },
+
+  getAllJobs: async (filters?: {
+    search?: string;
+    lga?: string;
+    min_pay?: number;
+    urgent?: boolean;
+  }): Promise<JobMatch[]> => {
+    if (USE_MOCK) {
+      await delay(500);
+      let jobs = [...mockAllJobs];
+      if (filters?.search) {
+        const q = filters.search.toLowerCase();
+        jobs = jobs.filter(j => j.title.toLowerCase().includes(q) || j.skills_required.some(s => s.toLowerCase().includes(q)));
+      }
+      if (filters?.lga) jobs = jobs.filter(j => j.lga === filters.lga);
+      if (filters?.min_pay) jobs = jobs.filter(j => j.pay >= filters.min_pay!);
+      if (filters?.urgent) jobs = jobs.filter(j => j.urgent);
+      return jobs;
+    }
+    const params = filters ? new URLSearchParams(filters as any).toString() : '';
+    return request<JobMatch[]>(`/api/job-seeker/jobs${params ? '?' + params : ''}`);
+  },
+
+  applyForJob: async (jobId: string): Promise<{ success: boolean }> => {
+    if (USE_MOCK) {
+      await delay(800);
+      return { success: true };
+    }
+    return request<{ success: boolean }>(`/api/job-seeker/jobs/${jobId}/apply`, { method: 'POST' });
+  },
+
+  getTransactions: async (filter?: 'all' | 'inflow' | 'outflow'): Promise<JSTransaction[]> => {
+    if (USE_MOCK) {
+      await delay(500);
+      if (!filter || filter === 'all') return mockJobSeekerTransactions;
+      return mockJobSeekerTransactions.filter(t => t.type === filter);
+    }
+    const params = filter ? `?filter=${filter}` : '';
+    return request<JSTransaction[]>(`/api/job-seeker/transactions${params}`);
+  },
+
+  getPulseScore: async () => {
+    if (USE_MOCK) {
+      await delay(400);
+      return {
+        score: mockJobSeekerDashboard.pulse_score,
+        tier: mockJobSeekerDashboard.tier,
+        signals: mockJobSeekerPulseSignals,
+      };
+    }
+    return request('/api/job-seeker/pulse');
+  },
+
+  getPulseHistory: async () => {
+    if (USE_MOCK) {
+      await delay(300);
+      return mockJobSeekerPulseHistory;
+    }
+    return request('/api/job-seeker/pulse/history');
+  },
+
+  getGigHistory: async (status?: 'completed' | 'cancelled'): Promise<GigRecord[]> => {
+    if (USE_MOCK) {
+      await delay(500);
+      if (!status) return mockJobSeekerGigHistory;
+      return mockJobSeekerGigHistory.filter(g => g.status === status);
+    }
+    const params = status ? `?status=${status}` : '';
+    return request<GigRecord[]>(`/api/job-seeker/gigs${params}`);
+  },
+
+  getNotifications: async (type?: 'job' | 'payment' | 'score'): Promise<JSNotification[]> => {
+    if (USE_MOCK) {
+      await delay(400);
+      if (!type) return mockJobSeekerNotifications;
+      return mockJobSeekerNotifications.filter(n => n.type === type);
+    }
+    const params = type ? `?type=${type}` : '';
+    return request<JSNotification[]>(`/api/job-seeker/notifications${params}`);
+  },
+
+  markNotificationsRead: async (): Promise<{ success: boolean }> => {
+    if (USE_MOCK) {
+      await delay(300);
+      return { success: true };
+    }
+    return request<{ success: boolean }>('/api/job-seeker/notifications/read', { method: 'POST' });
+  },
+
+  getQRCode: async () => {
+    if (USE_MOCK) {
+      await delay(300);
+      return mockJobSeekerQR;
+    }
+    return request('/api/job-seeker/qr-code');
   },
 };
 

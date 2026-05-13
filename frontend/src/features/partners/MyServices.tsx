@@ -1,43 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { lenderAPI } from '../../lib/api';
-import type { MyLoanRecord, MyLoanStats } from '../../lib/api';
+import { partnerAPI } from '../../lib/api';
+import type { MyLoanRecord } from '../../lib/api';
 import { HiOutlineDocumentDuplicate } from 'react-icons/hi';
 
-export const MyLoans: React.FC = () => {
-  const [stats, setStats] = useState<MyLoanStats | null>(null);
-  const [loans, setLoans] = useState<MyLoanRecord[]>([]);
-  const [loadingStats, setLoadingStats] = useState(true);
-  const [loadingLoans, setLoadingLoans] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'active' | 'repaid' | 'overdue'>('all');
+const getServiceTypeBadge = (type: string) => {
+  switch (type) {
+    case 'loan': return 'bg-[#1A6B4A]/10 text-[#1A6B4A] border-[#1A6B4A]/20';
+    case 'insurance': return 'bg-[#F4A11D]/10 text-[#F4A11D] border-[#F4A11D]/20';
+    case 'savings': return 'bg-[#3B82F6]/10 text-[#3B82F6] border-[#3B82F6]/20';
+    default: return 'bg-zovu-surface-2 text-zovu-text border-zovu-border';
+  }
+};
+
+export const MyServices: React.FC = () => {
+  const [services, setServices] = useState<any[]>([]);
+  const [loadingServices, setLoadingServices] = useState(true);
+  const [activeTab, setActiveTab] = useState<'all' | 'loan' | 'insurance' | 'savings' | 'overdue'>('all');
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchStats = async () => {
+    const fetchServices = async () => {
+      setLoadingServices(true);
       try {
-        const data = await lenderAPI.getLoanStats();
-        setStats(data);
+        const data = await partnerAPI.getMyServices(activeTab === 'all' ? undefined : activeTab);
+        setServices(data as any[]);
       } catch (e) {
-        console.error('Failed to fetch stats', e);
+        // handle error silently
       } finally {
-        setLoadingStats(false);
+        setLoadingServices(false);
       }
     };
-    fetchStats();
-  }, []);
-
-  useEffect(() => {
-    const fetchLoans = async () => {
-      setLoadingLoans(true);
-      try {
-        const data = await lenderAPI.getMyLoans(activeTab === 'all' ? undefined : activeTab);
-        setLoans(data);
-      } catch (e) {
-        console.error('Failed to fetch loans', e);
-      } finally {
-        setLoadingLoans(false);
-      }
-    };
-    fetchLoans();
+    fetchServices();
   }, [activeTab]);
 
   const handleCopy = (ref: string) => {
@@ -57,54 +50,30 @@ export const MyLoans: React.FC = () => {
 
   const getEmptyStateMessage = () => {
     switch (activeTab) {
-      case 'active': return "No active loans at the moment.";
-      case 'repaid': return "No repaid loans yet.";
-      case 'overdue': return "No overdue loans. Great repayment health!";
-      default: return "You have not disbursed any loans yet. Go to the borrower pool to fund your first borrower.";
+      case 'loan': return "No loan services at the moment.";
+      case 'insurance': return "No insurance services yet.";
+      case 'savings': return "No savings services yet.";
+      case 'overdue': return "No overdue services. Great health!";
+      default: return "You have not offered any services yet. Go to the customer pool to offer your first service.";
     }
+  };
+
+  const tabs = ['all', 'loan', 'insurance', 'savings', 'overdue'] as const;
+  const tabLabels: Record<string, string> = {
+    all: 'All',
+    loan: 'Loans',
+    insurance: 'Insurance',
+    savings: 'Savings',
+    overdue: 'Overdue'
   };
 
   return (
     <div className="max-w-6xl mx-auto text-zovu-text">
-      <h1 className="font-syne text-[28px] font-bold text-zovu-text-light mb-8">My Loans</h1>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-        <div className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6">
-          <p className="font-dm text-[13px] text-zovu-text mb-2">Total Disbursed</p>
-          {loadingStats ? (
-            <div className="h-8 bg-zovu-surface-2 animate-pulse rounded w-1/2"></div>
-          ) : (
-            <h3 className="font-syne text-[24px] font-bold text-zovu-text-light">
-              {stats ? formatCurrency(stats.total_disbursed) : '₦0'}
-            </h3>
-          )}
-        </div>
-        <div className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6">
-          <p className="font-dm text-[13px] text-zovu-text mb-2">Active Loans</p>
-          {loadingStats ? (
-            <div className="h-8 bg-zovu-surface-2 animate-pulse rounded w-1/3"></div>
-          ) : (
-            <h3 className="font-syne text-[24px] font-bold text-zovu-text-light">
-              {stats ? stats.active_loans : 0}
-            </h3>
-          )}
-        </div>
-        <div className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6">
-          <p className="font-dm text-[13px] text-zovu-text mb-2">Recovered</p>
-          {loadingStats ? (
-            <div className="h-8 bg-zovu-surface-2 animate-pulse rounded w-1/2"></div>
-          ) : (
-            <h3 className="font-syne text-[24px] font-bold text-zovu-text-light">
-              {stats ? formatCurrency(stats.recovered) : '₦0'}
-            </h3>
-          )}
-        </div>
-      </div>
+      <h1 className="font-syne text-[28px] font-bold text-zovu-text-light mb-8">My Services</h1>
 
       {/* Filter Tabs */}
       <div className="flex border-b border-zovu-border mb-8 overflow-x-auto no-scrollbar">
-        {(['all', 'active', 'repaid', 'overdue'] as const).map(tab => (
+        {tabs.map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -114,14 +83,14 @@ export const MyLoans: React.FC = () => {
                 : 'border-transparent text-zovu-text hover:text-zovu-text-light'
             }`}
           >
-            {tab}
+            {tabLabels[tab]}
           </button>
         ))}
       </div>
 
-      {/* Loan List */}
+      {/* Service List */}
       <div className="space-y-4">
-        {loadingLoans ? (
+        {loadingServices ? (
           // Skeleton Loader
           Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6 animate-pulse">
@@ -137,7 +106,7 @@ export const MyLoans: React.FC = () => {
               </div>
             </div>
           ))
-        ) : loans.length === 0 ? (
+        ) : services.length === 0 ? (
           // Empty State
           <div className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-12 text-center">
             <p className="font-dm text-[15px] text-zovu-text">
@@ -145,8 +114,61 @@ export const MyLoans: React.FC = () => {
             </p>
           </div>
         ) : (
-          // Loans
-          loans.map(loan => {
+          // Services
+          services.map((service, idx) => {
+            if (service.type === 'insurance') {
+              // Insurance service card
+              const statusColor = 
+                service.status === 'active' ? 'bg-[#1A6B4A]/10 text-[#1A6B4A] border-[#1A6B4A]/20' :
+                service.status === 'cancelled' ? 'bg-[#A0A0A0]/10 text-[#A0A0A0] border-[#A0A0A0]/20' :
+                'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/20';
+
+              return (
+                <div key={service.id || idx} className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6 transition-colors hover:border-zovu-border/80">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                    <div>
+                      <h3 className="font-syne text-[18px] font-bold text-zovu-text-light">
+                        {service.customer_name}
+                      </h3>
+                      <p className="font-dm text-[13px] text-zovu-text mt-1">{service.product_name}</p>
+                    </div>
+                    
+                    <div className="flex flex-row-reverse sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2.5 py-0.5 rounded-full border text-[10px] font-dm font-semibold tracking-wider uppercase ${getServiceTypeBadge('insurance')}`}>
+                          Insurance
+                        </span>
+                        <span className={`px-3 py-1 rounded-full border text-[11px] font-syne font-bold tracking-wider uppercase ${statusColor}`}>
+                          {service.status}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 font-dm text-[13px]">
+                    <div>
+                      <p className="text-zovu-text/60 mb-1">Monthly Premium</p>
+                      <p className="text-zovu-text-light font-medium">{formatCurrency(service.monthly_premium)}</p>
+                    </div>
+                    <div>
+                      <p className="text-zovu-text/60 mb-1">Coverage Amount</p>
+                      <p className="text-zovu-text-light font-medium">{formatCurrency(service.coverage_amount)}</p>
+                    </div>
+                    <div>
+                      <p className="text-zovu-text/60 mb-1">Next Deduction</p>
+                      <p className="text-zovu-text-light font-medium">{formatDate(service.next_deduction)}</p>
+                    </div>
+                    <div>
+                      <p className="text-zovu-text/60 mb-1">Status</p>
+                      <p className="text-zovu-text-light font-medium capitalize">{service.status}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Loan service card (existing)
+            const loan = service as MyLoanRecord & { type: string };
             const progress = (loan.amount_repaid / loan.total_repayment) * 100;
             const isOverdue = loan.status === 'overdue';
             const progressColor = isOverdue ? 'bg-[#EF4444]' : 'bg-[#1A6B4A]';
@@ -156,7 +178,7 @@ export const MyLoans: React.FC = () => {
               'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/20';
 
             return (
-              <div key={loan.transaction_ref} className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6 transition-colors hover:border-zovu-border/80">
+              <div key={loan.transaction_ref || idx} className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-6 transition-colors hover:border-zovu-border/80">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                   <div>
                     <h3 className="font-syne text-[18px] font-bold text-zovu-text-light">
@@ -178,9 +200,14 @@ export const MyLoans: React.FC = () => {
                   </div>
                   
                   <div className="flex flex-row-reverse sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2">
-                    <span className={`px-3 py-1 rounded-full border text-[11px] font-syne font-bold tracking-wider uppercase ${badgeColor}`}>
-                      {loan.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2.5 py-0.5 rounded-full border text-[10px] font-dm font-semibold tracking-wider uppercase ${getServiceTypeBadge('loan')}`}>
+                        Loan
+                      </span>
+                      <span className={`px-3 py-1 rounded-full border text-[11px] font-syne font-bold tracking-wider uppercase ${badgeColor}`}>
+                        {loan.status}
+                      </span>
+                    </div>
                     <span className="font-syne text-[20px] font-bold text-[#F4A11D]">
                       {formatCurrency(loan.amount)}
                     </span>

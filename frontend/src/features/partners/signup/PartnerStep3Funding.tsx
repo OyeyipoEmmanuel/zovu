@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLenderStore } from '../../../stores/lenderStore';
+import { usePartnerStore } from '../../../stores/partnerStore';
 import { lenderProfileAPI } from '../../../lib/api';
 
 const BANKS = ['GTBank', 'Access Bank', 'First Bank', 'UBA', 'Zenith', 'Sterling', 'Kuda', 'Opay', 'Palmpay', 'Other'];
 const TIERS = ['Bronze', 'Silver', 'Gold', 'Platinum'];
 const LGAS = ['Surulere', 'Ikeja', 'Oshodi', 'Lagos Island', 'Yaba', 'Lekki'];
 
-export const LenderStep3Funding: React.FC = () => {
+export const PartnerStep3Funding: React.FC = () => {
   const navigate = useNavigate();
-  const { setCurrentProfileStep } = useLenderStore();
+  const { setCurrentProfileStep } = usePartnerStore();
 
   const [bankName, setBankName] = useState(BANKS[0]);
   const [accountNumber, setAccountNumber] = useState('');
@@ -75,7 +75,7 @@ export const LenderStep3Funding: React.FC = () => {
       });
 
       setCurrentProfileStep('complete');
-      navigate('/dashboard/lender/complete-profile/success');
+      navigate('/dashboard/partners/complete-profile/success');
     } catch (err: any) {
       setError(err.message || 'Failed to complete profile. Please try again.');
     } finally {
@@ -210,7 +210,7 @@ export const LenderStep3Funding: React.FC = () => {
             type="button"
             onClick={() => {
               setCurrentProfileStep(2);
-              navigate('/dashboard/lender/complete-profile/identity');
+              navigate('/dashboard/partners/complete-profile/identity');
             }}
             className="flex-1 py-4 bg-zovu-surface-2 hover:bg-zovu-surface-2/80 text-zovu-text-light font-dm text-[15px] font-medium rounded-[8px] transition-colors border border-zovu-border"
           >

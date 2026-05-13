@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
-import { LenderRoutes } from './router';
+import { PartnerRoutes, JobSeekerRoutes } from './router';
 import { LandingPage } from './features/LandingPage';
 import {
   Login,
@@ -23,7 +23,16 @@ import {
 const DashboardRouter = () => {
   const { user } = useAuthStore();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'lender') return <Navigate to="/dashboard/lender" replace />;
+  
+  const role = user.role?.toLowerCase();
+  if (role === 'partner' || role === 'lender' || role === 'both') {
+    return <Navigate to="/dashboard/partners" replace />;
+  }
+  
+  if (role === 'job_seeker') {
+    return <Navigate to="/dashboard/job-seeker/onboarding" replace />;
+  }
+
   return <Navigate to="/dashboard/trader" replace />;
 };
 
@@ -50,8 +59,11 @@ function App() {
           </Route>
         </Route>
 
-        {/* Lender Dashboard Routes */}
-        {LenderRoutes}
+        {/* Partners Dashboard Routes */}
+        {PartnerRoutes}
+
+        {/* Job Seeker Dashboard Routes */}
+        {JobSeekerRoutes}
 
         {/* Redirect /dashboard to appropriate dashboard based on role */}
         <Route path="/dashboard" element={<DashboardRouter />} />

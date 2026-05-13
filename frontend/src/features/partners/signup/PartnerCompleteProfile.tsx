@@ -1,9 +1,9 @@
 import React from 'react';
 import { Outlet, useLocation, Navigate } from 'react-router-dom';
-import { useLenderStore } from '../../../stores/lenderStore';
+import { usePartnerStore } from '../../../stores/partnerStore';
 
-export const LenderCompleteProfile: React.FC = () => {
-  const { currentProfileStep } = useLenderStore();
+export const PartnerCompleteProfile: React.FC = () => {
+  const { currentProfileStep } = usePartnerStore();
   const location = useLocation();
 
   const isSuccess = location.pathname.includes('/success');
@@ -32,8 +32,8 @@ export const LenderCompleteProfile: React.FC = () => {
   };
 
   // Redirect to step 1 if trying to access wrapper without sub-route
-  if (location.pathname === '/dashboard/lender/complete-profile') {
-    return <Navigate to="/dashboard/lender/complete-profile/account" replace />;
+  if (location.pathname === '/dashboard/partners/complete-profile') {
+    return <Navigate to="/dashboard/partners/complete-profile/account" replace />;
   }
 
   return (

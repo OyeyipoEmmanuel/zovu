@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HiOutlineLockClosed, HiOutlineCheck } from 'react-icons/hi';
 import { useAuthStore, useTraderStore } from '../../../stores';
@@ -7,7 +7,7 @@ import { applyForLoan } from '../../../lib/api';
 
 export const LoanFlowModal: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  // const { user } = useAuthStore();
   const { pulseScore, pulseTier } = useTraderStore();
   
   const [step, setStep] = useState<1 | 2>(1);
