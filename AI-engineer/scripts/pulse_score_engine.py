@@ -119,7 +119,6 @@ class ZovuPulseEngine:
         
         
         # --- 4. Testing the Code ---
-        import pandas as pd
 
 
 # Sample DataFrames for testing
