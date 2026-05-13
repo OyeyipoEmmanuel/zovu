@@ -62,7 +62,7 @@ export const financialProfileSchema = z.object({
 
   agreedToTerms: z
     .literal(true, {
-      errorMap: () => ({ message: 'You must agree to the Terms of Service and Privacy Policy' }),
+      error: () => ({ message: 'You must agree to the Terms of Service and Privacy Policy' }),
     }),
 });
 

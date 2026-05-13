@@ -18,7 +18,7 @@ const passwordSchema = z
 
 export const personalInfoSchema = z
   .object({
-    role: z.enum(['trader', 'job_seeker', 'lender'], {
+    role: z.enum(['trader', 'job_seeker', 'partner'], {
       message: 'Please select a role',
     }),
     email: z
@@ -44,7 +44,7 @@ export const personalInfoSchema = z
     { message: 'Full name is required', path: ['full_name'] },
   )
   .refine(
-    (data) => data.role !== 'lender' || (data.company_name ?? '').trim() !== '',
+    (data) => data.role !== 'partner' || (data.company_name ?? '').trim() !== '',
     { message: 'Company name is required', path: ['company_name'] },
   );
 

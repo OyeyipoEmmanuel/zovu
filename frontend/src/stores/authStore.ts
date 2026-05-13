@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type UserRole = 'trader' | 'job_seeker' | 'lender';
+export type UserRole = 'trader' | 'job_seeker' | 'partner';
 
 export interface AuthUser {
   email: string;

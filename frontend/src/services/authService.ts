@@ -1,6 +1,6 @@
 import { api } from './api';
 
-export type UserRole = 'trader' | 'job_seeker' | 'lender';
+export type UserRole = 'trader' | 'job_seeker' | 'partner';
 
 export interface AuthUser {
   id: string;
