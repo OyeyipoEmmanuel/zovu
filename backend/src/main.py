@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 from src.config import settings
 from src.core.database import init_db, close_db
+from src.core.seeder import run_seeder
 from src.core.redis_client import close_redis
 from src.core.middleware import add_middleware
 from src.core.exceptions import ZovuAPIError
@@ -28,7 +29,7 @@ async def lifespan(app: FastAPI):
     """
     # ===== STARTUP =====
     logger.info("application_startup", environment=settings.ENVIRONMENT)
-    
+
     # Initialize database
     try:
         await init_db()
@@ -36,6 +37,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("database_initialization_failed", error=str(e), exc_info=True)
         raise
+
+    # Seed database from CSV files (no-op if data already exists)
+    try:
+        await run_seeder()
+    except Exception as e:
+        logger.error("seeder_failed", error=str(e), exc_info=True)
+        # Non-fatal in development; fatal in production
+        if settings.ENVIRONMENT == "production":
+            raise
     
     # Test Redis connection (non-fatal in development)
     try:
