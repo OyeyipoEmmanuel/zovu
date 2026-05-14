@@ -135,7 +135,7 @@ export const DashboardHome: React.FC = () => {
       ) : (
         <div className="bg-gradient-to-br from-zovu-primary/20 via-zovu-surface-1 to-zovu-surface-1 border border-zovu-primary/20 rounded-[16px] p-5 sm:p-6">
           <div className="flex items-center justify-between mb-1">
-            <p className="font-dm text-[12px] text-zovu-text uppercase tracking-wider">Squad Wallet Balance</p>
+            <p className="font-dm text-[12px] text-zovu-text uppercase tracking-wider"> Wallet Balance</p>
             <span className="font-dm text-[11px] text-zovu-text bg-zovu-surface-2 px-2 py-0.5 rounded-full">
               {bankName}
             </span>

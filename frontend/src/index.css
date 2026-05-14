@@ -1,5 +1,36 @@
 @import 'tailwindcss';
 
+/* Hide ALL Google Translate UI elements */
+.goog-te-combo,
+.goog-te-gadget,
+.goog-te-gadget-simple,
+.goog-te-menu-value,
+.goog-te-banner-frame,
+.goog-te-ftab-float,
+#goog-gt-tt,
+.goog-tooltip,
+.goog-tooltip-content,
+.skiptranslate {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+/* Prevent body shift */
+body {
+  top: 0 !important;
+  padding-bottom: 56px;
+}
+
+/* Hide the top bar Google Translate adds */
+.goog-te-banner-frame.skiptranslate {
+  display: none !important;
+}
+
+frame,
+iframe {
+  pointer-events: none;
+}
+
 @theme {
   --font-syne: 'Syne', sans-serif;
   --font-dm: 'DM Sans', sans-serif;

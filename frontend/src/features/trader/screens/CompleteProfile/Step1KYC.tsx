@@ -9,7 +9,7 @@ export const Step1KYC: React.FC = () => {
 
   const [nin, setNin] = useState('');
   const [bvn, setBvn] = useState('');
-  const [middleName, setMiddleName] = useState('');
+  const [fullName, setFullName] = useState('');
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState<'1' | '2'>('1');
   const [address, setAddress] = useState('');
@@ -23,7 +23,7 @@ export const Step1KYC: React.FC = () => {
   const isValid =
     /^\d{11}$/.test(nin) &&
     /^\d{11}$/.test(bvn) &&
-    middleName.trim().length > 0 &&
+    fullName.trim().length > 0 &&
     dob !== '' &&
     address.trim().length > 0;
 
@@ -41,7 +41,7 @@ export const Step1KYC: React.FC = () => {
       const res = await submitKYC({
         nin,
         bvn,
-        middle_name: middleName,
+        full_name: fullName,
         dob: formattedDob,
         gender,
         address,
@@ -143,13 +143,13 @@ export const Step1KYC: React.FC = () => {
         </div>
       </div>
 
-      {/* Middle Name */}
+      {/* Full Name */}
       <div className="flex flex-col gap-1.5">
-        <label className="font-dm text-[13px] text-zovu-text-light font-medium">Middle Name</label>
+        <label className="font-dm text-[13px] text-zovu-text-light font-medium">Full Name</label>
         <input
           type="text"
-          value={middleName}
-          onChange={(e) => setMiddleName(e.target.value)}
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
           placeholder="As it appears on your ID"
           className="w-full bg-transparent border border-zovu-border rounded-[8px] font-dm text-[14px] text-zovu-text-light px-4 py-3 outline-none focus:border-zovu-primary transition-colors"
         />
