@@ -368,28 +368,23 @@ class Transaction(Base):
     amount: Mapped[int] = mapped_column(Integer)  # KOBO
     squad_reference: Mapped[str | None] = mapped_column(String(100))
 
-    # is this compulsory 
-    direction: Mapped[str] = mapped_column(String(20))
+    direction: Mapped[str] = mapped_column(String(20))  # credit | debit
 
+    # Extended fields (added for marketplace/seeder compatibility)
+    amount_gross: Mapped[int | None] = mapped_column(Integer)   # KOBO (before fee)
+    squad_fee: Mapped[int | None] = mapped_column(Integer)       # KOBO
     method: Mapped[str | None] = mapped_column(String(50))
     status: Mapped[str] = mapped_column(String(50))  # pending | completed | failed
     tx_metadata: Mapped[dict | None] = mapped_column(JSON, name='metadata')
+    economic_context: Mapped[EconomicContext | None] = mapped_column(SQLEnum(EconomicContext))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_transactions")
     receiver = relationship("User", foreign_keys=[receiver_id], back_populates="received_transactions")
     loan = relationship("Loan", back_populates="transactions")
 
-    # UPGRADE TRANSACTION MODEL
-    amount_gross: Mapped[int | None] = mapped_column(Integer)
-    squad_fee: Mapped[int | None] = mapped_column(Integer)
-    method: Mapped[str | None] = mapped_column(String(50))
-
-    economic_context: Mapped[EconomicContext | None] = mapped_column(
-        SQLEnum(EconomicContext)
-    )
-    
     __table_args__ = (
         Index("ix_transactions_sender_id", "sender_id"),
         Index("ix_transactions_receiver_id", "receiver_id"),
