@@ -450,6 +450,7 @@ class Gig(Base):
     )
 
     amount: Mapped[int] = mapped_column(Integer)
+    payment_period: Mapped[str | None] = mapped_column(String(50))  # One-off | Daily | Weekly | Monthly
 
     status: Mapped[GigStatus] = mapped_column(
         SQLEnum(GigStatus),
@@ -480,6 +481,63 @@ class Gig(Base):
         Index("ix_gigs_status", "status"),
         Index("ix_gigs_location", "location"),
     )
+
+
+class GigApplication(Base):
+    """Application by a job seeker to a gig."""
+    __tablename__ = "gig_applications"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    gig_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("gigs.id", ondelete="CASCADE"))
+    seeker_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending | accepted | rejected
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("gig_id", "seeker_id", name="uq_gig_seeker_application"),
+        Index("ix_gig_applications_gig_id", "gig_id"),
+        Index("ix_gig_applications_seeker_id", "seeker_id"),
+    )
+
+
+class LenderUnlock(Base):
+    """Tracks when a lender has unlocked a borrower's full profile."""
+    __tablename__ = "lender_unlocks"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lender_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
+    borrower_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
+    unlocked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("lender_id", "borrower_id", name="uq_lender_borrower_unlock"),
+        Index("ix_lender_unlocks_lender_id", "lender_id"),
+        Index("ix_lender_unlocks_borrower_id", "borrower_id"),
+    )
+
+
+class JobRecommendation(Base):
+    """AI-matched job recommendation for a seeker, created when a gig is posted."""
+    __tablename__ = "job_recommendations"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    seeker_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    gig_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("gigs.id", ondelete="CASCADE"), nullable=False)
+    synergy_score: Mapped[float] = mapped_column(Float, default=0.0)
+    match_tags: Mapped[list | None] = mapped_column(JSON, default=list)
+    email_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    viewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    applied: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("seeker_id", "gig_id", name="uq_seeker_gig_recommendation"),
+        Index("ix_job_recommendations_seeker_id", "seeker_id"),
+        Index("ix_job_recommendations_gig_id", "gig_id"),
+    )
+
 
 class Ajo(Base):
     """Ajo savings group model."""

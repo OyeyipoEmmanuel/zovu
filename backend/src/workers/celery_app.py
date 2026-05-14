@@ -9,12 +9,15 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Create Celery instance
-celery_app = Celery("zovu")
-
-# Redis broker config (db=2)
-celery_app.conf.broker_url = f"{settings.REDIS_URL}?db=2"
-celery_app.conf.result_backend = f"{settings.REDIS_URL}?db=2"
+# Create Celery instance (broker/backend: DB index in URL path, not ?db=)
+celery_app = Celery(
+    "zovu",
+    broker=settings.celery_broker_url_resolved,
+    backend=settings.celery_result_backend_resolved,
+)
+# Force broker/backend from app settings (overrides process env like CELERY_BROKER_URL from .env)
+celery_app.conf.broker_url = settings.celery_broker_url_resolved
+celery_app.conf.result_backend = settings.celery_result_backend_resolved
 
 # Task config
 celery_app.conf.task_serializer = "json"
@@ -54,9 +57,17 @@ celery_app.conf.task_default_exchange = "default"
 celery_app.conf.task_default_routing_key = "default"
 
 # Queue-specific retry/timeout config
+celery_app.autodiscover_tasks([
+    "src.workers.credit_tasks",
+    "src.workers.squad_tasks",
+    "src.workers.job_tasks",
+])
 celery_app.conf.task_routes = {
     "src.workers.squad_tasks.*": {"queue": "critical", "priority": 10},
+    "src.workers.job_tasks.process_gig_payout": {"queue": "critical", "priority": 9},
+    "src.workers.job_tasks.notify_matching_seekers": {"queue": "default", "priority": 5},
     "src.workers.credit_tasks.*": {"queue": "default", "priority": 5},
+    "src.workers.credit_tasks.update_activity_feed_cache": {"queue": "low", "priority": 1},
     "src.workers.embedding_tasks.*": {"queue": "low", "priority": 1},
     "src.workers.fraud_tasks.*": {"queue": "default", "priority": 7},
 }

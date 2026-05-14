@@ -38,15 +38,9 @@ async def lifespan(app: FastAPI):
         logger.error("database_initialization_failed", error=str(e), exc_info=True)
         raise
 
-    # Seed database from CSV files (no-op if data already exists)
-    try:
-        await run_seeder()
-    except Exception as e:
-        logger.error("seeder_failed", error=str(e), exc_info=True)
-        # Non-fatal in development; fatal in production
-        if settings.ENVIRONMENT == "production":
-            raise
-    
+    # Seed database from CSV files (no-op if data already exists; never aborts startup)
+    await run_seeder()
+
     # Test Redis connection (non-fatal in development)
     try:
         from src.core.redis_client import redis_client
@@ -54,10 +48,11 @@ async def lifespan(app: FastAPI):
         await redis.ping()
         logger.info("redis_connected")
     except Exception as e:
-        if settings.ENVIRONMENT == "production":
-            logger.error("redis_connection_failed", error=str(e), exc_info=True)
-            raise
-        logger.warning("redis_unavailable_dev_mode", error=str(e))
+        logger.error("redis_required", error=str(e))
+        raise RuntimeError(
+            f"Redis is required for authentication and sessions. "
+            f"Start Redis and set REDIS_URL. Error: {e}"
+        )
     
     # Test external APIs are configured
     if not settings.OPENAI_API_KEY:
@@ -131,6 +126,7 @@ def create_app() -> FastAPI:
     # Pydantic validation errors → envelope format
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        import uuid as _uuid
         errors = exc.errors()
         first = errors[0] if errors else {}
         field = ".".join(str(l) for l in first.get("loc", [])[1:]) or None
@@ -143,6 +139,29 @@ def create_app() -> FastAPI:
                     "message": first.get("msg", "Validation error"),
                     "field": field,
                 },
+                "request_id": str(_uuid.uuid4()),
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        import uuid as _uuid
+        logger.error(
+            "unhandled_exception",
+            error=str(exc),
+            path=str(request.url),
+            exc_info=True,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ok": False,
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "An unexpected error occurred. Please try again.",
+                    "field": None,
+                },
+                "request_id": str(_uuid.uuid4()),
             },
         )
 
@@ -171,6 +190,9 @@ def create_app() -> FastAPI:
     from src.routers import (
         auth_router,
         credit_router,
+        gigs_router,
+        lenders_router,
+        job_seekers_router,
         loans_router,
         transactions_router,
         ajo_router,
@@ -179,7 +201,10 @@ def create_app() -> FastAPI:
     )
     
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
-    app.include_router(credit_router, prefix="/api/v1/credit", tags=["Credit"])
+    app.include_router(credit_router, prefix="/api/v1")
+    app.include_router(gigs_router, prefix="/api/v1")
+    app.include_router(lenders_router, prefix="/api/v1")
+    app.include_router(job_seekers_router, prefix="/api/v1")
     app.include_router(loans_router, prefix="/api/v1/loans", tags=["Loans"])
     app.include_router(transactions_router, prefix="/api/v1/transactions", tags=["Transactions"])
     app.include_router(ajo_router, prefix="/api/v1/ajo", tags=["Ajo"])

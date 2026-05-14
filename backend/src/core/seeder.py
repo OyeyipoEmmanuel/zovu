@@ -17,9 +17,10 @@ import ast
 import structlog
 import pandas as pd
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func
 
 from src.core.database import async_session
 from src.models.base import (
@@ -33,21 +34,32 @@ from src.models.base import (
     EconomicContext,
     ShieldStatus,
     BusinessType,
+    Ajo,
+    AjoMembership,
 )
 
 logger = structlog.get_logger()
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-_DATA_DIR = os.path.join(
-    os.path.dirname(__file__),          # backend/src/core/
-    "..", "..", "..",                   # up to repo root
-    "AI-engineer", "data",
+_FALLBACK_DATA_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "AI-engineer", "data")
 )
+_DATA_DIR = os.environ.get("CSV_DATA_DIR", _FALLBACK_DATA_DIR)
 
-TRADERS_CSV      = os.path.abspath(os.path.join(_DATA_DIR, "traders_final.csv"))
-SEEKERS_CSV      = os.path.abspath(os.path.join(_DATA_DIR, "seekers_final.csv"))
-JOBS_CSV         = os.path.abspath(os.path.join(_DATA_DIR, "jobs_final.csv"))
-TRANSACTIONS_CSV = os.path.abspath(os.path.join(_DATA_DIR, "transactions_final.csv"))
+TRADERS_CSV      = os.path.join(_DATA_DIR, "traders_final.csv")
+SEEKERS_CSV      = os.path.join(_DATA_DIR, "seekers_final.csv")
+JOBS_CSV         = os.path.join(_DATA_DIR, "jobs_final.csv")
+TRANSACTIONS_CSV = os.path.join(_DATA_DIR, "transactions_final.csv")
+
+
+def _validate_csv_paths() -> None:
+    """Raise FileNotFoundError if any required CSV is missing."""
+    missing = [p for p in [TRADERS_CSV, SEEKERS_CSV, JOBS_CSV, TRANSACTIONS_CSV]
+               if not os.path.exists(p)]
+    if missing:
+        raise FileNotFoundError(
+            f"CSV files not found. Set CSV_DATA_DIR env var.\nMissing: {missing}"
+        )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -121,24 +133,24 @@ def _naive_to_utc(value) -> datetime:
 
 # ── Core seeder functions ─────────────────────────────────────────────────────
 
-async def _already_seeded(session: AsyncSession) -> bool:
-    """Return True if the users table already has data."""
-    result = await session.execute(select(func.count()).select_from(User))
-    count = result.scalar_one()
-    return count > 0
-
-
-async def _seed_traders(session: AsyncSession) -> dict[str, str]:
+async def _seed_traders(session: AsyncSession) -> tuple[dict[str, str], set[str]]:
     """
     Load traders_final.csv → User rows (user_type=TRADER).
-    Returns {csv_trader_id: db_uuid} lookup map.
+    Returns ({csv_trader_id: db_uuid}, set of normalized trader emails).
     """
     logger.info("seeder.traders.start", path=TRADERS_CSV)
     df = pd.read_csv(TRADERS_CSV)
+    seen_emails: dict[str, object] = {}
+    for _, row in df.iterrows():
+        email = str(row.get("email", "")).strip().lower()
+        if email and email not in seen_emails:
+            seen_emails[email] = row
+    rows = list(seen_emails.values())
+
     id_map: dict[str, str] = {}
     users = []
 
-    for _, row in df.iterrows():
+    for row in rows:
         uid = str(uuid.uuid4())
         id_map[row["trader_id"]] = uid
 
@@ -174,20 +186,28 @@ async def _seed_traders(session: AsyncSession) -> dict[str, str]:
     session.add_all(users)
     await session.flush()
     logger.info("seeder.traders.done", count=len(users))
-    return id_map
+    return id_map, set(seen_emails.keys())
 
 
-async def _seed_seekers(session: AsyncSession) -> dict[str, str]:
+async def _seed_seekers(session: AsyncSession, existing_emails: set) -> dict[str, str]:
     """
     Load seekers_final.csv → User rows (user_type=SEEKER).
     Returns {csv_seeker_id: db_uuid} lookup map.
     """
     logger.info("seeder.seekers.start", path=SEEKERS_CSV)
     df = pd.read_csv(SEEKERS_CSV)
+    seen_emails: dict[str, object] = {}
+    for _, row in df.iterrows():
+        email = str(row.get("email", "")).strip().lower()
+        if email and email not in seen_emails:
+            seen_emails[email] = row
+    rows = list(seen_emails.values())
+    rows = [r for r in rows if str(r["email"]).strip().lower() not in existing_emails]
+
     id_map: dict[str, str] = {}
     users = []
 
-    for _, row in df.iterrows():
+    for row in rows:
         uid = str(uuid.uuid4())
         id_map[row["seeker_id"]] = uid
 
@@ -255,7 +275,8 @@ async def _seed_gigs(
             title=f"{row.get('skill_required', 'General')} Job",
             description=None,
             skill_required=str(row.get("skill_required", "")),
-            location="",                   # not in CSV; left blank
+            payment_period=str(row.get("job_type", "")),
+            location="",                   # will be enriched post-seed
             economic_context=_parse_economic_context(row.get("economic_context")) or EconomicContext.NORMAL,
             amount=_to_kobo(row.get("amount_paid", 0)),
             status=GigStatus.COMPLETED,    # all seeded jobs are historical
@@ -340,28 +361,86 @@ async def _seed_transactions(
     logger.info("seeder.transactions.done", count=len(transactions), skipped=skipped)
 
 
+async def _seed_ajo_groups(
+    session: AsyncSession,
+    trader_map: dict[str, str],
+) -> None:
+    """
+    Create one Ajo savings group per unique trader location.
+    Adds up to 20 local traders as members.
+    """
+    logger.info("seeder.ajo_groups.start", path=TRADERS_CSV)
+    df = pd.read_csv(TRADERS_CSV)
+
+    # Group CSV trader IDs by location
+    loc_traders: dict[str, list[str]] = defaultdict(list)
+    for _, row in df.iterrows():
+        loc = str(row.get("location", "")).strip()
+        if loc and loc.lower() not in ("nan", "none", ""):
+            loc_traders[loc].append(str(row["trader_id"]))
+
+    groups_created = 0
+    for location, csv_ids in loc_traders.items():
+        organizer_uid = trader_map.get(csv_ids[0])
+        if not organizer_uid:
+            continue
+
+        ajo = Ajo(
+            id=str(uuid.uuid4()),
+            name=f"{location} Traders Group",
+            description=f"Community Ajo savings group for traders in {location}",
+            organizer_id=organizer_uid,
+            contribution_amount=500000,   # ₦5,000 in kobo
+            contribution_frequency="monthly",
+            max_members=min(len(csv_ids), 20),
+        )
+        session.add(ajo)
+        await session.flush()
+
+        for order, csv_id in enumerate(csv_ids[:20]):
+            uid = trader_map.get(csv_id)
+            if uid:
+                session.add(AjoMembership(
+                    id=str(uuid.uuid4()),
+                    ajo_id=ajo.id,
+                    user_id=uid,
+                    payout_order=order + 1,
+                ))
+
+        groups_created += 1
+
+    await session.flush()
+    logger.info("seeder.ajo_groups.done", count=groups_created)
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 async def run_seeder() -> None:
     """
     Main entry point — called once at server startup.
     Loads all CSV data into the database if the users table is empty.
+    Never raises: failures are logged and startup continues.
     """
-    async with async_session() as session:
-        async with session.begin():
-            if await _already_seeded(session):
-                logger.info("seeder.skipped", reason="data already exists")
+    try:
+        async with async_session() as session:
+            user_count = await session.scalar(
+                select(func.count()).select_from(User.__table__)
+            )
+            n = int(user_count or 0)
+            if n > 0:
+                logger.info("seeder.skipped", reason="data already exists", user_count=n)
                 return
 
-            logger.info("seeder.start", message="Seeding database from CSV files…")
+        _validate_csv_paths()
 
-            try:
-                trader_map = await _seed_traders(session)
-                seeker_map = await _seed_seekers(session)
+        async with async_session() as session:
+            async with session.begin():
+                logger.info("seeder.start", message="Seeding database from CSV files…")
+                trader_map, trader_emails = await _seed_traders(session)
+                seeker_map = await _seed_seekers(session, existing_emails=trader_emails)
                 await _seed_gigs(session, trader_map, seeker_map)
                 await _seed_transactions(session, trader_map, seeker_map)
-                # session.begin() context manager commits on exit
+                await _seed_ajo_groups(session, trader_map)
                 logger.info("seeder.complete", message="✅ All data seeded successfully")
-            except Exception as exc:
-                logger.error("seeder.failed", error=str(exc), exc_info=True)
-                raise   # re-raise so the session rolls back
+    except Exception as exc:
+        logger.error("seeder.failed", error=str(exc), exc_info=True)

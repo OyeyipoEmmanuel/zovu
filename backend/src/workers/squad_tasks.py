@@ -53,6 +53,11 @@ def retry_squad_provisioning(self, user_id: str):
 
     try:
         asyncio.run(_run())
+        try:
+            from src.workers.credit_tasks import update_activity_feed_cache
+            update_activity_feed_cache.delay()
+        except Exception as cache_err:
+            logger.warning("squad_task.cache_invalidation_failed", error=str(cache_err))
     except Exception as exc:
         attempt = self.request.retries + 1
         # Exponential backoff: 10 * 3^attempt seconds
