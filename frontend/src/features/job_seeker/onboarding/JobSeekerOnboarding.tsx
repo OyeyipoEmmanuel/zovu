@@ -13,7 +13,7 @@ const STEPS = [
 export const JobSeekerOnboarding = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { currentOnboardingStep, jobSeekerOnboardingComplete } = useJobSeekerStore();
+  const { jobSeekerOnboardingComplete } = useJobSeekerStore();
 
   const isSuccessScreen = location.pathname.includes('/success');
   const currentStepIndex = STEPS.findIndex(s => location.pathname.includes(s.path));

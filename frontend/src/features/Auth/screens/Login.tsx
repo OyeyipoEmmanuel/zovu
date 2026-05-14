@@ -13,6 +13,7 @@ import { loginSchema, type LoginFormData } from '../schemas';
 import { login, saveAccessToken } from '../../../services/authService';
 import { useAuthStore } from '../../../stores/authStore';
 import { ApiError } from '../../../services/api';
+import { invalidateAuthMeCache } from '../../../lib/api';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -34,6 +35,7 @@ export const Login: React.FC = () => {
     setApiError('');
     try {
       const res = await login(data.email, data.password);
+      invalidateAuthMeCache();
       saveAccessToken(res.access_token);
       useAuthStore.getState().setToken(res.access_token);
       useAuthStore.getState().setUser({

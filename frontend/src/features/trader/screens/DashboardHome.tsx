@@ -60,6 +60,7 @@ export const DashboardHome: React.FC = () => {
       setPulse(pulse);
       setGigs(gigs);
       setUser({
+        id: profile.id ?? profile.email,
         firstName: profile.firstName,
         lastName: profile.lastName,
         email: profile.email,
@@ -73,7 +74,11 @@ export const DashboardHome: React.FC = () => {
       setRecentTxns(txnRes.data.slice(0, 5));
       setProfileCompletion(profile.profileCompletion);
       setActiveGigCount(gigs.filter((g) => g.status === 'active').length);
-      setUserName(`${profile.firstName} ${profile.lastName}`);
+      const greeting =
+        profile.role === 'trader' && profile.businessName?.trim()
+          ? profile.businessName.trim()
+          : [profile.firstName, profile.lastName].filter(Boolean).join(' ').trim() || profile.email;
+      setUserName(greeting);
     } catch {
       setError('Failed to load dashboard data.');
     } finally {

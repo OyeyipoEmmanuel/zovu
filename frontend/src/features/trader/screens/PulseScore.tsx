@@ -4,7 +4,6 @@ import { fetchPulseScore, fetchPulseHistory } from '../../../lib/api';
 import { formatCurrency } from '../../../lib/utils';
 import { useKYCGuard, KYCModal } from '../hooks';
 import { LoanFlowModal } from './LoanFlowModal';
-import { useNavigate } from 'react-router-dom';
 import type { PulseSignal, PulseHistoryPoint } from '../../../lib/mockData';
 
 const ArcGauge: React.FC<{ score: number; maxScore: number }> = ({ score, maxScore }) => {
@@ -135,7 +134,6 @@ const HistoryChart: React.FC<{ data: PulseHistoryPoint[] }> = ({ data }) => {
 };
 
 export const PulseScore: React.FC = () => {
-  const navigate = useNavigate();
   const { kycComplete } = useKYCGuard();
   const [showKYCModal, setShowKYCModal] = useState(false);
   const [showLoanModal, setShowLoanModal] = useState(false);

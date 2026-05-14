@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { register as registerUser, verifyOtp, resendOtp, saveAccessToken, type UserRole } from '../../../services/authService';
 import { useAuthStore } from '../../../stores/authStore';
 import { ApiError } from '../../../services/api';
+import { invalidateAuthMeCache } from '../../../lib/api';
 import {
   AuthLayout,
   FormField,
@@ -96,6 +97,7 @@ export const Signup: React.FC = () => {
     setApiError('');
     try {
       const res = await verifyOtp(savedFormData.email, otpCode);
+      invalidateAuthMeCache();
       saveAccessToken(res.access_token);
       useAuthStore.getState().setToken(res.access_token);
       useAuthStore.getState().setUser({
