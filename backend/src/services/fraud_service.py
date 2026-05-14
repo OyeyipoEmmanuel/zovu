@@ -14,7 +14,7 @@ from src.models.admin import UserFlag, AdminAuditLog
 from src.models.base import User, Transaction, RefreshToken, Device
 from src.services.email_service import EmailService
 from src.core.exceptions import ZovuAPIError
-from src.core.security import encrypt_field
+from src.core.security import encrypt_pii
 
 logger = structlog.get_logger()
 

@@ -31,6 +31,17 @@ import { JobSeekerGigHistory } from '../features/job_seeker/dashboard/JobSeekerG
 import { JobSeekerQRCheckin } from '../features/job_seeker/dashboard/JobSeekerQRCheckin';
 import { JobSeekerNotifications } from '../features/job_seeker/dashboard/JobSeekerNotifications';
 
+// Admin Imports
+import { AdminGuard } from '../features/admin/AdminGuard';
+import { AdminLayout } from '../features/admin/AdminLayout';
+import AdminOverview from '../features/admin/screens/AdminOverview';
+import ComplaintManagement from '../features/admin/screens/ComplaintManagement';
+import ComplaintDetail from '../features/admin/screens/ComplaintDetail';
+import FraudManagement from '../features/admin/screens/FraudManagement';
+import MetricsDashboard from '../features/admin/screens/MetricsDashboard';
+import PartnershipManagement from '../features/admin/screens/PartnershipManagement';
+import AuditLog from '../features/admin/screens/AuditLog';
+
 const PartnerProtectedRoute = () => {
   // TODO: remove this in production
   if (import.meta.env.DEV) {
@@ -543,4 +554,24 @@ export const JobSeekerRoutes = (
       </Route>
     </Route>
   </>
+);
+
+// ─── Admin Dashboard Routes ───────────────────────────────────
+
+export const AdminRoutes = (
+  <Route
+    element={
+      <AdminGuard>
+        <AdminLayout />
+      </AdminGuard>
+    }
+  >
+    <Route path="/admin" element={<AdminOverview />} />
+    <Route path="/admin/complaints" element={<ComplaintManagement />} />
+    <Route path="/admin/complaints/:id" element={<ComplaintDetail />} />
+    <Route path="/admin/fraud" element={<FraudManagement />} />
+    <Route path="/admin/metrics" element={<MetricsDashboard />} />
+    <Route path="/admin/partnerships" element={<PartnershipManagement />} />
+    <Route path="/admin/audit" element={<AuditLog />} />
+  </Route>
 );

@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
-import { PartnerRoutes, JobSeekerRoutes } from './router';
+import { PartnerRoutes, JobSeekerRoutes, AdminRoutes } from './router';
 import { LandingPage } from './features/LandingPage';
 import {
   Login,
@@ -25,6 +25,9 @@ const DashboardRouter = () => {
   if (!user) return <Navigate to="/login" replace />;
   
   const role = user.role?.toLowerCase();
+  if (role === 'admin') {
+    return <Navigate to="/admin" replace />;
+  }
   if (role === 'partner' || role === 'lender' || role === 'both') {
     return <Navigate to="/dashboard/partners" replace />;
   }
@@ -64,6 +67,9 @@ function App() {
 
         {/* Job Seeker Dashboard Routes */}
         {JobSeekerRoutes}
+
+        {/* Admin Dashboard Routes */}
+        {AdminRoutes}
 
         {/* Redirect /dashboard to appropriate dashboard based on role */}
         <Route path="/dashboard" element={<DashboardRouter />} />

@@ -2,7 +2,7 @@
  * Admin API client service
  * All admin endpoints using TanStack Query compatible request format
  */
-import { request } from "@/lib/api";
+import { request } from "./api";
 
 // ── COMPLAINTS ────────────────────────────────────
 export const adminComplaintsAPI = {

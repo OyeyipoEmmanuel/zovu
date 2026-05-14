@@ -4,9 +4,22 @@ import './index.css'
 import App from './App.tsx'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
-    <LanguageSwitcher />
+    <QueryClientProvider client={queryClient}>
+      <App />
+      <LanguageSwitcher />
+    </QueryClientProvider>
   </StrictMode>,
 )

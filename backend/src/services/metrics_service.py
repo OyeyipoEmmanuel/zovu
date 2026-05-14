@@ -290,10 +290,21 @@ class MetricsService:
                 daily_max["date"] = day.strftime("%Y-%m-%d")
                 daily_max["volume"] = volume
 
+        # Status breakdown
+        status_query = select(
+            Transaction.status,
+            func.count(Transaction.id)
+        ).where(Transaction.created_at >= period_start).group_by(Transaction.status)
+        status_result = await self.db.execute(status_query)
+        status_breakdown = [
+            {"status": row[0], "value": row[1]} for row in status_result.all()
+        ]
+
         return {
             "daily_volume_kobo": daily_volume,
             "daily_count": daily_count,
             "top_day": daily_max,
+            "status_breakdown": status_breakdown,
         }
 
     async def get_business_metrics(self) -> dict:
@@ -312,13 +323,24 @@ class MetricsService:
             select(func.count(User.id)).where(User.business_type == "online_vendor")
         )
 
+        # Sector distribution
+        sector_query = select(
+            User.business_type,
+            func.count(User.id)
+        ).where(User.user_type == UserType.TRADER).group_by(User.business_type)
+        sector_result = await self.db.execute(sector_query)
+        sector_distribution = [
+            {"sector": row[0] or "Other", "count": row[1]} for row in sector_result.all()
+        ]
+
         return {
             "by_type": {
                 "wholesaler": wholesalers.scalar() or 0,
                 "retailer": retailers.scalar() or 0,
                 "small_kiosk": kioskowners.scalar() or 0,
                 "online_vendor": online_vendors.scalar() or 0,
-            }
+            },
+            "sector_distribution": sector_distribution
         }
 
     async def generate_daily_report(self, report_date: date) -> dict:

@@ -134,3 +134,8 @@ def validate_password_strength(password: str) -> None:
         raise ValueError("Password must contain at least one digit")
     if not re.search(r"[^A-Za-z0-9]", password):
         raise ValueError("Password must contain at least one special character")
+
+
+# Aliases for backward compatibility
+encrypt_field = encrypt_pii
+decrypt_field = decrypt_pii

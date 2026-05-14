@@ -67,16 +67,16 @@ export const clearAccessToken = (): void => {
 };
 
 export const register = (payload: RegisterPayload) =>
-  api.post<RegisterResponse>('/auth/register', payload);
+  api.post<RegisterResponse>('/auth/register', payload, false);
 
 export const verifyOtp = (email: string, otp: string) =>
-  api.post<AuthResponse>('/auth/verify-otp', { email, otp });
+  api.post<AuthResponse>('/auth/verify-otp', { email, otp }, false);
 
 export const resendOtp = (email: string) =>
-  api.post<{ message: string }>('/auth/resend-otp', { email });
+  api.post<{ message: string }>('/auth/resend-otp', { email }, false);
 
 export const login = (email: string, password: string) =>
-  api.post<AuthResponse>('/auth/login', { email, password });
+  api.post<AuthResponse>('/auth/login', { email, password }, false);
 
 export const refreshToken = () =>
   api.post<AuthResponse>('/auth/refresh', {});

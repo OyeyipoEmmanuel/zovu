@@ -18,20 +18,44 @@ const getAuthHeader = (): Record<string, string> => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-const request = async <T>(
+export const request = async <T>(
   path: string,
-  options: RequestInit & { auth?: boolean }
+  options: RequestInit & { auth?: boolean; params?: Record<string, any>; body?: any } = {}
 ): Promise<T> => {
-  const { auth = false, ...init } = options;
+  const { auth = true, params, body, ...init } = options;
+  
+  let url = `${BASE_URL}${path}`;
+  if (params) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.append(key, String(value));
+      }
+    });
+    const qs = searchParams.toString();
+    if (qs) url += `?${qs}`;
+  }
+
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(init.headers as Record<string, string>),
   };
+
+  let finalBody = body;
+  if (body && typeof body === 'object' && !(body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+    finalBody = JSON.stringify(body);
+  } else if (body) {
+    // If body is already a string or FormData, don't re-stringify
+  } else {
+    headers['Content-Type'] = 'application/json';
+  }
+
   if (auth) Object.assign(headers, getAuthHeader());
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(url, {
     ...init,
     headers,
+    body: finalBody,
     credentials: 'include',
   });
 
@@ -57,11 +81,11 @@ export const api = {
   get: <T>(path: string, auth = true) =>
     request<T>(path, { method: 'GET', auth }),
 
-  post: <T>(path: string, body: unknown, auth = false) =>
-    request<T>(path, { method: 'POST', body: JSON.stringify(body), auth }),
+  post: <T>(path: string, body: unknown, auth = true) =>
+    request<T>(path, { method: 'POST', body, auth }),
 
   patch: <T>(path: string, body: unknown, auth = true) =>
-    request<T>(path, { method: 'PATCH', body: JSON.stringify(body), auth }),
+    request<T>(path, { method: 'PATCH', body, auth }),
 
   delete: <T>(path: string, auth = true) =>
     request<T>(path, { method: 'DELETE', auth }),
