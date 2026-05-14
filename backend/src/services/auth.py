@@ -43,6 +43,12 @@ def _utcnow() -> datetime:
 
 
 def _display_name(user: User) -> str:
+    role = (user.role or "").lower()
+    if role == "trader":
+        biz = (user.business_name or "").strip()
+        if biz:
+            return biz
+        return user.full_name or user.company_name or user.first_name or user.email
     return user.business_name or user.full_name or user.company_name or user.first_name or user.email
 
 

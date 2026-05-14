@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HiOutlineLockClosed, HiOutlineCheck } from 'react-icons/hi';
-import { useAuthStore, useTraderStore } from '../../../stores';
+import { useTraderStore } from '../../../stores';
 import { formatCurrency } from '../../../lib/utils';
 import { applyForLoan } from '../../../lib/api';
 

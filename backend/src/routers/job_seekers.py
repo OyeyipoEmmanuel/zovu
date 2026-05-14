@@ -9,7 +9,7 @@ from sqlalchemy import select, desc, and_, or_
 
 from src.core.database import get_db
 from src.dependencies import get_current_user
-from src.models import User, Gig, GigApplication, JobRecommendation, GigStatus, Credit
+from src.models import User, Gig, GigApplication, JobRecommendation, GigStatus
 from src.core.utils import format_naira, get_pulse_tier
 from src.core.redis_client import get_redis_cache
 
@@ -43,7 +43,7 @@ def _serialize_gig_as_job(gig: Gig, match_pct: int = 0, match_tags: list | None 
     }
 
 
-def _compute_synergy(seeker: User, gig: Gig, credit: Credit | None) -> tuple[int, list[str]]:
+def _compute_synergy(seeker: User, gig: Gig) -> tuple[int, list[str]]:
     """Simple synergy score: 0-100, returns (score, match_tags)."""
     tags = []
     score = 0
@@ -66,9 +66,10 @@ def _compute_synergy(seeker: User, gig: Gig, credit: Credit | None) -> tuple[int
             score += 30
             tags.append(f"Location: {gig.location}")
 
-    if credit and credit.pulse_score:
-        score += min(20, credit.pulse_score // 50)
-        if credit.pulse_score >= 400:
+    pulse = int(seeker.pulse_score or 0)
+    if pulse:
+        score += min(20, pulse // 50)
+        if pulse >= 400:
             tags.append("Good Pulse Score")
 
     return min(score, 100), tags
@@ -82,9 +83,7 @@ async def get_profile(
     user: User = Depends(get_current_user),
 ):
     _require_seeker(user)
-    credit_q = select(Credit).where(Credit.user_id == user.id)
-    credit = (await db.execute(credit_q)).scalar_one_or_none()
-    score = credit.pulse_score if credit else 0
+    score = int(user.pulse_score or 0)
 
     return {"ok": True, "data": {
         "id": user.id,
@@ -118,16 +117,13 @@ async def get_matches(
     except Exception:
         pass
 
-    credit_q = select(Credit).where(Credit.user_id == user.id)
-    credit = (await db.execute(credit_q)).scalar_one_or_none()
-
     gigs_q = (select(Gig).where(Gig.status == GigStatus.OPEN)
               .order_by(desc(Gig.created_at)).limit(200))
     gigs = (await db.execute(gigs_q)).scalars().all()
 
     scored = []
     for gig in gigs:
-        synergy, tags = _compute_synergy(user, gig, credit)
+        synergy, tags = _compute_synergy(user, gig)
         if synergy > 0:
             scored.append((synergy, tags, gig))
 
@@ -247,9 +243,7 @@ async def get_dashboard(
     user: User = Depends(get_current_user),
 ):
     _require_seeker(user)
-    credit_q = select(Credit).where(Credit.user_id == user.id)
-    credit = (await db.execute(credit_q)).scalar_one_or_none()
-    score = credit.pulse_score if credit else 0
+    score = int(user.pulse_score or 0)
 
     apps_q = select(GigApplication).where(GigApplication.seeker_id == user.id)
     apps = (await db.execute(apps_q)).scalars().all()

@@ -50,10 +50,11 @@ router = APIRouter()
     description="List user's transactions with cursor-based pagination",
 )
 async def list_transactions(
-    limit: int = Query(20, ge=1, le=100, description="Page size"),
+    limit: int = Query(12, ge=1, le=100, description="Page size"),
     cursor: str = Query(None, description="Pagination cursor"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
 ):
     """
     List user's transactions with cursor-based pagination.
@@ -61,11 +62,21 @@ async def list_transactions(
     **Cursor-based pagination** ensures consistent results even as data changes.
     
     Query params:
-    - **limit**: Number of items (1-100, default 20)
+    - **limit**: Number of items (1-100, default 12)
     - **cursor**: Pagination cursor (from previous response)
     
     Returns items in reverse chronological order (newest first).
     """
+    cache_key = None
+    if not cursor:
+        cache_key = f"txns:list:{user.id}:{limit}"
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return json.loads(cached.decode() if isinstance(cached, bytes) else cached)
+        except Exception as exc:
+            logger.warning("transactions_cache_get_failed", error=str(exc))
+
     # Decode cursor if provided
     starting_timestamp = None
     if cursor:
@@ -110,8 +121,6 @@ async def list_transactions(
             json.dumps(cursor_data).encode()
         ).decode()
     
-    _inflow_types = {"credit_deposit", "loan_disbursement", "ajo_payout"}
-
     def _enrich(t) -> dict:
         direction = "inflow" if t.direction == "credit" else "outflow"
         amount_display = format_naira(t.amount or 0)
@@ -137,12 +146,18 @@ async def list_transactions(
             "created_at": t.created_at.isoformat(),
         }
 
-    return {
+    payload = {
         "items": [_enrich(t) for t in transactions],
         "total": len(transactions),
         "cursor": next_cursor,
         "has_more": has_more,
     }
+    if cache_key:
+        try:
+            await redis.setex(cache_key, 60, json.dumps(payload))
+        except Exception as exc:
+            logger.warning("transactions_cache_set_failed", error=str(exc))
+    return payload
 
 
 @router.get(
