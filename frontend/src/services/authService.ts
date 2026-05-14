@@ -66,26 +66,49 @@ export const clearAccessToken = (): void => {
   localStorage.removeItem('zovu_access_token');
 };
 
+// Backend uses "lender"; frontend uses "partner". Translate at the API boundary.
+const toBackendRole = (r: UserRole): string => (r === 'partner' ? 'lender' : r);
+const fromBackendRole = (r: string | null | undefined): UserRole =>
+  (r === 'lender' ? 'partner' : (r as UserRole));
+
+const normalizeAuthUser = (u: AuthUser): AuthUser => ({
+  ...u,
+  role: fromBackendRole(u.role as unknown as string),
+});
+
+const normalizeAuthResponse = (res: AuthResponse): AuthResponse => ({
+  ...res,
+  user: normalizeAuthUser(res.user),
+});
+
 export const register = (payload: RegisterPayload) =>
-  api.post<RegisterResponse>('/auth/register', payload, false);
+  api.post<RegisterResponse>(
+    '/auth/register',
+    { ...payload, role: toBackendRole(payload.role) },
+    false,
+  );
 
 export const verifyOtp = (email: string, otp: string) =>
-  api.post<AuthResponse>('/auth/verify-otp', { email, otp }, false);
+  api
+    .post<AuthResponse>('/auth/verify-otp', { email, otp }, false)
+    .then(normalizeAuthResponse);
 
 export const resendOtp = (email: string) =>
   api.post<{ message: string }>('/auth/resend-otp', { email }, false);
 
 export const login = (email: string, password: string) =>
-  api.post<AuthResponse>('/auth/login', { email, password }, false);
+  api
+    .post<AuthResponse>('/auth/login', { email, password }, false)
+    .then(normalizeAuthResponse);
 
 export const refreshToken = () =>
-  api.post<AuthResponse>('/auth/refresh', {});
+  api.post<AuthResponse>('/auth/refresh', {}).then(normalizeAuthResponse);
 
 export const logout = () =>
   api.post<{ message: string }>('/auth/logout', {}, true);
 
 export const getMe = () =>
-  api.get<AuthUser>('/auth/me', true);
+  api.get<AuthUser>('/auth/me', true).then(normalizeAuthUser);
 
 export const submitKyc = (payload: KycPayload) =>
   api.post<{ status: string; message: string }>(

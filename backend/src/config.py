@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Default admin (created idempotently by the seeder on startup)
+    ADMIN_EMAIL: str = "admin@zovu.co"
+    ADMIN_PASSWORD: str = "ZovuAdmin2026!"
+    ADMIN_FULL_NAME: str = "Admin User"
+
     # Celery: broker always follows REDIS_URL (DB /2). Legacy env key kept for .env compatibility (ignored).
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""

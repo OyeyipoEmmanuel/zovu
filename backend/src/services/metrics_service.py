@@ -71,7 +71,7 @@ class MetricsService:
         daily_active_result = await self.db.execute(
             select(func.count(func.distinct(Transaction.sender_id))).where(
                 Transaction.created_at >= datetime.now(timezone.utc) - timedelta(days=1),
-                Transaction.status == "COMPLETED",
+                Transaction.status == "completed",
             )
         )
         daily_active = daily_active_result.scalar() or 0
@@ -101,13 +101,14 @@ class MetricsService:
         volume_today_result = await self.db.execute(
             select(func.sum(Transaction.amount_gross)).where(
                 and_(
-                    Transaction.status == "COMPLETED",
+                    Transaction.status == "completed",
                     Transaction.created_at >= today_start,
                     Transaction.created_at < today_end,
                 )
             )
         )
-        volume_today_kobo = int((volume_today_result.scalar() or 0) * 100)
+        # amount_gross is already stored in kobo (see seeder._to_kobo) — no ×100.
+        volume_today_kobo = int(volume_today_result.scalar() or 0)
 
         count_today_result = await self.db.execute(
             select(func.count(Transaction.id)).where(
@@ -124,7 +125,7 @@ class MetricsService:
         success_count_result = await self.db.execute(
             select(func.count(Transaction.id)).where(
                 and_(
-                    Transaction.status == "COMPLETED",
+                    Transaction.status == "completed",
                     Transaction.created_at >= week_start,
                 )
             )
@@ -141,12 +142,12 @@ class MetricsService:
         avg_size_result = await self.db.execute(
             select(func.avg(Transaction.amount_gross)).where(
                 and_(
-                    Transaction.status == "COMPLETED",
+                    Transaction.status == "completed",
                     Transaction.created_at >= week_start,
                 )
             )
         )
-        avg_size_kobo = int((avg_size_result.scalar() or 0) * 100)
+        avg_size_kobo = int(avg_size_result.scalar() or 0)
 
         # ── Alerts ──
         new_fraud_flags_result = await self.db.execute(
@@ -236,7 +237,7 @@ class MetricsService:
             select(func.count(func.distinct(Transaction.sender_id))).where(
                 and_(
                     Transaction.created_at >= today_start,
-                    Transaction.status == "COMPLETED",
+                    Transaction.status == "completed",
                 )
             )
         )
@@ -266,14 +267,15 @@ class MetricsService:
             volume_result = await self.db.execute(
                 select(func.sum(Transaction.amount_gross)).where(
                     and_(
-                        Transaction.status == "COMPLETED",
+                        Transaction.status == "completed",
                         Transaction.created_at >= day_start,
                         Transaction.created_at < day_end,
                     )
                 )
             )
             volume = volume_result.scalar() or 0
-            daily_volume[day.strftime("%Y-%m-%d")] = int(volume * 100)
+            # amount_gross is already kobo.
+            daily_volume[day.strftime("%Y-%m-%d")] = int(volume)
 
             count_result = await self.db.execute(
                 select(func.count(Transaction.id)).where(
@@ -369,18 +371,18 @@ class MetricsService:
         tx_volume_result = await self.db.execute(
             select(func.sum(Transaction.amount_gross)).where(
                 and_(
-                    Transaction.status == "COMPLETED",
+                    Transaction.status == "completed",
                     Transaction.created_at >= day_start,
                     Transaction.created_at < day_end,
                 )
             )
         )
-        tx_volume_kobo = int((tx_volume_result.scalar() or 0) * 100)
+        tx_volume_kobo = int(tx_volume_result.scalar() or 0)
 
         tx_success_result = await self.db.execute(
             select(func.count(Transaction.id)).where(
                 and_(
-                    Transaction.status == "COMPLETED",
+                    Transaction.status == "completed",
                     Transaction.created_at >= day_start,
                     Transaction.created_at < day_end,
                 )

@@ -114,10 +114,10 @@ const AuditLog: React.FC = () => {
       <div className="bg-[#141414] border border-white/5 rounded-[16px] p-6">
         <AdminTable
           columns={columns}
-          data={data?.data?.data || []}
+          data={(data as any)?.data || []}
           isLoading={isLoading}
-          nextCursor={data?.data?.next_cursor}
-          onLoadMore={() => setFilters(prev => ({ ...prev, cursor: data?.data?.next_cursor }))}
+          nextCursor={(data as any)?.next_cursor}
+          onLoadMore={() => setFilters(prev => ({ ...prev, cursor: (data as any)?.next_cursor }))}
         />
       </div>
     </div>

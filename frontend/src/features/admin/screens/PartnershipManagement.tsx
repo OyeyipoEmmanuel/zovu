@@ -137,7 +137,7 @@ const PartnershipManagement: React.FC = () => {
             activeTab === 'requests' ? 'bg-[#1A6B4A] text-white' : 'text-[#A0A0A0] hover:text-white'
           }`}
         >
-          New Requests ({requestsData?.data?.total || 0})
+          New Requests ({((requestsData as any)?.data?.length) || 0})
         </button>
         <button
           onClick={() => setActiveTab('active')}
@@ -153,13 +153,13 @@ const PartnershipManagement: React.FC = () => {
         {activeTab === 'requests' ? (
           <AdminTable
             columns={requestColumns}
-            data={requestsData?.data?.data || []}
+            data={(requestsData as any)?.data || []}
             isLoading={requestsLoading}
           />
         ) : (
           <AdminTable
             columns={activeColumns}
-            data={activeData?.data?.data || []}
+            data={(activeData as any)?.data || []}
             isLoading={activeLoading}
           />
         )}

@@ -30,12 +30,12 @@ const MetricsDashboard: React.FC = () => {
   const handleExport = async () => {
     const today = new Date().toISOString().split('T')[0];
     try {
-      const res = await adminMetricsAPI.getDailyReport(today);
-      const blob = new Blob([res.data], { type: 'text/csv' });
+      const res = (await adminMetricsAPI.getDailyReport(today)) as any;
+      const blob = new Blob([JSON.stringify(res, null, 2)], { type: 'application/json' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `zovu_report_${today}.csv`;
+      a.download = `zovu_report_${today}.json`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -44,11 +44,15 @@ const MetricsDashboard: React.FC = () => {
     }
   };
 
-  const userChartData = usersData?.data?.daily_new_users 
-    ? Object.entries(usersData.data.daily_new_users).map(([date, count]) => ({ date, count }))
+  // `request()` already unwraps the envelope — the query results ARE the metric payloads.
+  const users = usersData as any;
+  const tx = txData as any;
+  const biz = bizData as any;
+  const userChartData = users?.daily_new_users
+    ? Object.entries(users.daily_new_users).map(([date, count]) => ({ date, count }))
     : [];
-  const txStatusData = txData?.data?.status_breakdown || [];
-  const sectorData = bizData?.data?.sector_distribution || [];
+  const txStatusData = tx?.status_breakdown || [];
+  const sectorData = biz?.sector_distribution || [];
 
   return (
     <div className="space-y-8">

@@ -114,7 +114,8 @@ const FraudManagement: React.FC = () => {
     });
   };
 
-  const analytics = analyticsData?.data;
+  // `request()` already strips the envelope — `analyticsData` IS the analytics payload.
+  const analytics = analyticsData as any;
 
   return (
     <div className="space-y-8">
@@ -135,7 +136,7 @@ const FraudManagement: React.FC = () => {
         <h3 className="font-syne text-[18px] font-bold text-white mb-6">Flagged Accounts</h3>
         <AdminTable
           columns={columns}
-          data={data?.data?.data || []}
+          data={(data as any)?.data || []}
           isLoading={isLoading}
         />
       </div>

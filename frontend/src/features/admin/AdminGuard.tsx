@@ -12,7 +12,9 @@ interface AdminGuardProps {
 
 export const AdminGuard: React.FC<AdminGuardProps> = ({ children }) => {
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuthStore();
+  const { user, token } = useAuthStore();
+  // The authStore exposes `token` (and `user`), not `isAuthenticated` — derive it.
+  const isAuthenticated = Boolean(token);
 
   useEffect(() => {
     if (!isAuthenticated) {

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('zovu.db'\\); cur=c.cursor\\(\\); cur.execute\\('SELECT name FROM sqlite_master WHERE type=\\\\\"table\\\\\"'\\); print\\([r[0] for r in cur.fetchall\\(\\)]\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit=$?\")"
+    ]
+  }
+}

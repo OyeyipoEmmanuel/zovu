@@ -246,16 +246,37 @@ async def submit_kyc(
         user.bvn = bvn_encrypted
         user.nin = nin_encrypted
 
+        # The user has supplied every required field — their profile IS complete.
+        # `profile_complete` gates the dashboard banner and the KYC modal; without
+        # flipping it here the user gets re-prompted forever because /auth/me keeps
+        # returning False.
+        user.profile_complete = True
+
+        # In non-production environments there is no Celery worker running the
+        # `verify_kyc_documents` task, so `kyc_verified` would stay False forever
+        # and the frontend KYC guard would keep blocking access. Treat a
+        # well-formed submission as verified outside production; prod still waits
+        # for the async fraud task to flip this.
+        if settings.ENVIRONMENT != "production":
+            user.kyc_verified = True
+
         await db.commit()
 
-        from src.workers.fraud_tasks import verify_kyc_documents
-        verify_kyc_documents.delay(user.id, req.bvn, req.nin)
+        try:
+            from src.workers.fraud_tasks import verify_kyc_documents
+            verify_kyc_documents.delay(user.id, req.bvn, req.nin)
+        except Exception as exc:
+            # Celery may be unavailable in dev — never let task dispatch fail the
+            # request, because the data is already saved.
+            logger.warning("kyc_celery_dispatch_failed", user_id=user.id, error=str(exc))
 
         logger.info("kyc_submission_received", user_id=user.id)
 
         return _ok({
             "status": "submitted",
             "message": "KYC documents submitted. Verification in progress.",
+            "kyc_verified": bool(user.kyc_verified),
+            "profile_complete": bool(user.profile_complete),
         })
     except Exception as exc:
         logger.error("kyc_submission_failed", user_id=user.id, error=str(exc))

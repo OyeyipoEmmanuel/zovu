@@ -7,13 +7,16 @@ from sqlalchemy import (
     String, Integer, Boolean, DateTime, Text, JSON, ForeignKey,
     Index, CheckConstraint
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB as PG_JSONB
 from sqlalchemy.orm import mapped_column, Mapped, relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 import uuid
 
 from src.models.base import Base
+
+# JSONB on Postgres, JSON on SQLite (dev/test) — keeps a single model definition working on both.
+JSONB = PG_JSONB().with_variant(JSON(), "sqlite")
 
 
 class Complaint(Base):

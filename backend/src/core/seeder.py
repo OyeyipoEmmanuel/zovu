@@ -160,6 +160,8 @@ async def _seed_traders(session: AsyncSession) -> tuple[dict[str, str], set[str]
             phone=b"",                          # placeholder — encrypted in prod
             password_hash="seeded",             # placeholder
             user_type=UserType.TRADER,
+            role="trader",                      # role-based endpoints need this set
+            email_verified=True,
             status=UserStatus.ACTIVE,
             first_name=str(row["first_name"]),
             last_name=str(row["last_name"]),
@@ -217,6 +219,8 @@ async def _seed_seekers(session: AsyncSession, existing_emails: set) -> dict[str
             phone=b"",
             password_hash="seeded",
             user_type=UserType.SEEKER,
+            role="job_seeker",                  # role-based endpoints need this set
+            email_verified=True,
             status=UserStatus.ACTIVE,
             first_name=str(row["first_name"]),
             last_name=str(row["last_name"]),
@@ -257,10 +261,39 @@ async def _seed_gigs(
     """
     logger.info("seeder.gigs.start", path=JOBS_CSV)
     df = pd.read_csv(JOBS_CSV)
+
+    # The CSV ships every gig with status="Paid", which would mark them all
+    # COMPLETED and leave seekers with an empty marketplace (the seeker-facing
+    # endpoints filter on status == OPEN). Carve out the most recent slice as
+    # OPEN so the marketplace is actually browsable; older rows stay historical.
+    OPEN_GIG_COUNT = 500
+    try:
+        df_sorted_idx = pd.to_datetime(df["created_at"], errors="coerce").sort_values(ascending=False).index
+        open_row_ids = set(df_sorted_idx[:OPEN_GIG_COUNT].tolist())
+    except Exception:
+        open_row_ids = set(df.index[-OPEN_GIG_COUNT:].tolist())
+
     gigs = []
     skipped = 0
 
-    for _, row in df.iterrows():
+    # Map CSV "status" → GigStatus.
+    def _map_gig_status(csv_status: str | None, has_seeker: bool, force_open: bool) -> GigStatus:
+        if force_open:
+            return GigStatus.OPEN
+        s = (str(csv_status) if csv_status is not None else "").strip().lower()
+        if not has_seeker:
+            return GigStatus.OPEN
+        if s in ("paid", "completed"):
+            return GigStatus.COMPLETED
+        if s in ("cancelled", "canceled"):
+            return GigStatus.CANCELLED
+        if s in ("in_progress", "in progress", "ongoing", "assigned", "accepted"):
+            return GigStatus.IN_PROGRESS
+        if s in ("open", "pending", "unfilled", ""):
+            return GigStatus.OPEN
+        return GigStatus.COMPLETED
+
+    for idx, row in df.iterrows():
         t_uid = trader_map.get(row["trader_id"])
         s_uid = seeker_map.get(row["seeker_id"])
 
@@ -268,10 +301,20 @@ async def _seed_gigs(
             skipped += 1
             continue
 
+        status = _map_gig_status(
+            row.get("status"),
+            has_seeker=bool(s_uid),
+            force_open=idx in open_row_ids,
+        )
+        # Only assign seeker_id when the gig actually moved past OPEN; an
+        # OPEN gig with a seeker assigned would block /gigs/{id}/apply.
+        seeker_for_gig = s_uid if status != GigStatus.OPEN else None
+        completed_at = _naive_to_utc(row.get("updated_at")) if status == GigStatus.COMPLETED else None
+
         gigs.append(Gig(
             id=str(uuid.uuid4()),
             trader_id=t_uid,
-            seeker_id=s_uid,
+            seeker_id=seeker_for_gig,
             title=f"{row.get('skill_required', 'General')} Job",
             description=None,
             skill_required=str(row.get("skill_required", "")),
@@ -279,12 +322,12 @@ async def _seed_gigs(
             location="",                   # will be enriched post-seed
             economic_context=_parse_economic_context(row.get("economic_context")) or EconomicContext.NORMAL,
             amount=_to_kobo(row.get("amount_paid", 0)),
-            status=GigStatus.COMPLETED,    # all seeded jobs are historical
+            status=status,
             trader_rating=int(row["trader_rating"]) if pd.notna(row.get("trader_rating")) else None,
             seeker_rating=int(row["seeker_rating"]) if pd.notna(row.get("seeker_rating")) else None,
             created_at=_naive_to_utc(row.get("created_at")),
             updated_at=_naive_to_utc(row.get("updated_at")),
-            completed_at=_naive_to_utc(row.get("updated_at")),
+            completed_at=completed_at,
         ))
 
     session.add_all(gigs)
@@ -427,10 +470,15 @@ async def run_seeder() -> None:
                 select(func.count()).select_from(User.__table__)
             )
             n = int(user_count or 0)
-            if n > 0:
-                logger.info("seeder.skipped", reason="data already exists", user_count=n)
-                await _seed_admin_user(session)
-                return
+        if n > 0:
+            logger.info("seeder.skipped", reason="data already exists", user_count=n)
+            # Fresh session so the admin upsert owns its own transaction
+            # (the count query above autobegan one on the prior session).
+            async with async_session() as admin_session:
+                async with admin_session.begin():
+                    await _seed_admin_user(admin_session)
+            logger.info("seeder.completed", admin_only=True)
+            return
 
         _validate_csv_paths()
 
@@ -442,52 +490,69 @@ async def run_seeder() -> None:
                 await _seed_gigs(session, trader_map, seeker_map)
                 await _seed_transactions(session, trader_map, seeker_map)
                 await _seed_ajo_groups(session, trader_map)
-                logger.info("seeder.complete", message="✅ All data seeded successfully")
                 await _seed_admin_user(session)
+                logger.info("seeder.completed", message="All data seeded successfully")
     except Exception as exc:
         logger.error("seeder.failed", error=str(exc), exc_info=True)
 
 
 async def _seed_admin_user(session: AsyncSession) -> None:
     """
-    Create a default admin user for development if none exists.
-    Credentials are logged at startup for dev use only.
+    Create a default admin user idempotently. Credentials come from settings
+    (ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_FULL_NAME in .env).
+
+    Idempotency is enforced by checking on the unique `email` column — safe
+    to call on every startup.
     """
     from src.models.base import User
     from src.core.security import hash_password
-    
-    existing = await session.execute(
-        select(User).where(User.role == "admin").limit(1)
+    from src.config import settings
+
+    admin_email = settings.ADMIN_EMAIL.strip().lower()
+    admin_password = settings.ADMIN_PASSWORD
+    admin_full_name = settings.ADMIN_FULL_NAME
+
+    existing = await session.scalar(
+        select(User).where(User.email == admin_email)
     )
-    if existing.scalar_one_or_none():
-        return  # Admin already exists
-    
-    admin_id = str(uuid.uuid4())
-    admin_email = "admin@zovu.co"
-    admin_password = "ZovuAdmin2026!"  # Dev only
-    
+    if existing:
+        # Ensure existing admin row is usable for login (env may have changed)
+        changed = False
+        if existing.role != "admin":
+            existing.role = "admin"
+            changed = True
+        if not existing.email_verified:
+            existing.email_verified = True
+            changed = True
+        if existing.is_banned:
+            existing.is_banned = False
+            existing.ban_reason = None
+            changed = True
+        if changed:
+            logger.info("admin_user_reconciled", email=admin_email)
+        return
+
     admin = User(
-        id=admin_id,
+        id=str(uuid.uuid4()),
         email=admin_email,
-        phone=b"08000000000",  # Encrypted in prod
+        password_hash=hash_password(admin_password),
+        phone=b"",  # Fernet-encrypted in prod; empty placeholder is fine for admin
         role="admin",
-        language="english",
-        profile_complete=True,
-        is_banned=False,
         user_type=UserType.SEEKER,
         status=UserStatus.ACTIVE,
+        full_name=admin_full_name,
+        email_verified=True,   # required so /auth/login does not 403 on EMAIL_NOT_VERIFIED
+        profile_complete=True,
+        is_banned=False,
         kyc_verified=True,
-        full_name="Admin User",
+        squad_provisioned=False,
     )
-    admin.password_hash = hash_password(admin_password)
-    
     session.add(admin)
     await session.flush()
-    
+
     logger.info(
         "admin_user_created",
         email=admin_email,
-        password=admin_password,
-        note="DEVELOPMENT ONLY — change in production",
+        note="Credentials sourced from ADMIN_EMAIL / ADMIN_PASSWORD env vars",
     )
 

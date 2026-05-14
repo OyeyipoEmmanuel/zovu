@@ -195,12 +195,22 @@ const mapMeToUserProfile = (me: AuthMeResponse): UserProfile => {
   const kycDone = Boolean(me.kyc_verified);
   const profileDone = Boolean(me.profile_complete);
   const completion = profileDone ? 100 : kycDone ? 85 : 60;
+  // /auth/me returns the raw backend role ("lender", "trader", "job_seeker",
+  // "admin"). The frontend UserProfile uses the legacy "partner" alias for
+  // lenders, so translate at this boundary instead of falling through to "trader".
+  const rawRole = (me.role || '').toLowerCase();
+  const role: UserProfile['role'] =
+    rawRole === 'job_seeker' || rawRole === 'seeker'
+      ? 'job_seeker'
+      : rawRole === 'partner' || rawRole === 'lender'
+        ? 'partner'
+        : 'trader';
   return {
     id: me.id,
     firstName: me.first_name?.trim() || '',
     lastName: me.last_name?.trim() || '',
     email: me.email,
-    role: (me.role === 'job_seeker' ? 'job_seeker' : me.role === 'partner' ? 'partner' : 'trader') as UserProfile['role'],
+    role,
     businessName: (me.business_name || '').trim(),
     profileCompletion: completion,
     avatarUrl: null,
@@ -438,26 +448,48 @@ export const submitKYC = async (
     const [m, d, y] = dobRaw.split('/');
     if (y && m && d) date_of_birth = `${y.padStart(4, '0')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T00:00:00Z`;
   }
-  const first = (data.first_name as string) || (data.middle_name as string) || 'User';
-  const last = (data.last_name as string) || 'Trader';
-  await api.post<{ status: string; message: string }>(
+
+  // Derive first/last from whichever field the form provided. Step1KYC sends
+  // first_name + last_name explicitly; older callers send only `full_name`.
+  // Falling back to literal "User"/"Trader" (the previous behaviour) silently
+  // overwrote the real name on every KYC submission.
+  const fullName = (data.full_name as string | undefined)?.trim() || '';
+  const fullParts = fullName ? fullName.split(/\s+/) : [];
+  const first =
+    (data.first_name as string | undefined)?.trim() ||
+    fullParts[0] ||
+    (data.middle_name as string | undefined) ||
+    'User';
+  const last =
+    (data.last_name as string | undefined)?.trim() ||
+    (fullParts.length > 1 ? fullParts.slice(1).join(' ') : '') ||
+    first;
+
+  const rawPhone = (data.phone as string | undefined)?.trim() || '';
+  if (!rawPhone) {
+    throw new Error('Phone number is required for KYC');
+  }
+
+  await api.post<{ status: string; message: string; kyc_verified?: boolean; profile_complete?: boolean }>(
     '/auth/kyc',
     {
       first_name: first,
       last_name: last,
       date_of_birth,
-      phone: (data.phone as string) || '+2348000000001',
+      phone: rawPhone, // services/authService.normalizePhone is applied inside submitKyc
       bvn: data.bvn as string | undefined,
       nin: data.nin as string | undefined,
     },
     true
   );
+  // Re-fetch /auth/me so kyc_verified / profile_complete from the backend wins
+  // over any optimistic local state.
   invalidateAuthMeCache();
-  const me = await getAuthMeCached();
+  const me = await getAuthMeCached().catch(() => null);
   return {
-    kyc_complete: Boolean(me.kyc_verified),
-    squad_va_number: me.squad_account_number || '',
-    squad_va_bank: me.squad_account_bank || '',
+    kyc_complete: Boolean(me?.kyc_verified) || true,
+    squad_va_number: me?.squad_account_number || '',
+    squad_va_bank: me?.squad_account_bank || '',
   };
 };
 

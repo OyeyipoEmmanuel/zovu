@@ -18,8 +18,10 @@ const AdminOverview: React.FC = () => {
     queryFn: () => adminAuditAPI.getLog({ limit: 10 }),
   });
 
-  const metrics = metricsData?.data;
-  const auditLogs = auditData?.data?.data || [];
+  // The shared `request()` helper already unwraps the `{ok, data}` envelope,
+  // so `metricsData` IS the metrics payload and `auditData` IS `{data, has_more, next_cursor}`.
+  const metrics = metricsData as any;
+  const auditLogs = ((auditData as any)?.data as any[]) || [];
 
   const formatNaira = (kobo: number) => {
     return new Intl.NumberFormat('en-NG', {

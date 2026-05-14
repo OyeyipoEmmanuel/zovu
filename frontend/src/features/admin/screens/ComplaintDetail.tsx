@@ -36,7 +36,8 @@ const ComplaintDetail: React.FC = () => {
     },
   });
 
-  const complaint = data?.data;
+  // `request()` already strips the envelope — `data` IS the complaint payload.
+  const complaint = data as any;
 
   const handleStatusUpdate = (status: string) => {
     updateMutation.mutate({ status, admin_notes: adminNotes || undefined });

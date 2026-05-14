@@ -61,6 +61,8 @@ celery_app.autodiscover_tasks([
     "src.workers.credit_tasks",
     "src.workers.squad_tasks",
     "src.workers.job_tasks",
+    "src.workers.fraud_tasks",
+    "src.workers.embedding_tasks",
 ])
 celery_app.conf.task_routes = {
     "src.workers.squad_tasks.*": {"queue": "critical", "priority": 10},

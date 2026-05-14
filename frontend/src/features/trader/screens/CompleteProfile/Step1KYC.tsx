@@ -10,20 +10,31 @@ export const Step1KYC: React.FC = () => {
   const [nin, setNin] = useState('');
   const [bvn, setBvn] = useState('');
   const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState<'1' | '2'>('1');
   const [address, setAddress] = useState('');
-  
+
   const [ninFocused, setNinFocused] = useState(false);
   const [bvnFocused, setBvnFocused] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Backend `UserKYCSchema.phone` requires `^\+?234\d{10}$`; allow the local
+  // `0xxxxxxxxxx` form too because `normalizePhone` in authService converts it
+  // before posting.
+  const phoneDigits = phone.replace(/\D/g, '');
+  const phoneValid =
+    /^\+?234\d{10}$/.test(phone.replace(/\s+/g, '')) ||
+    /^0\d{10}$/.test(phoneDigits) ||
+    /^234\d{10}$/.test(phoneDigits);
+
   const isValid =
     /^\d{11}$/.test(nin) &&
     /^\d{11}$/.test(bvn) &&
-    fullName.trim().length > 0 &&
+    fullName.trim().split(/\s+/).length >= 2 &&
+    phoneValid &&
     dob !== '' &&
     address.trim().length > 0;
 
@@ -38,10 +49,18 @@ export const Step1KYC: React.FC = () => {
       const [y, m, d] = dob.split('-');
       const formattedDob = `${m}/${d}/${y}`;
 
+      // Split the single Full Name input into first/last for the backend.
+      const nameParts = fullName.trim().split(/\s+/);
+      const first = nameParts[0] || 'User';
+      const last = nameParts.slice(1).join(' ') || 'User';
+
       const res = await submitKYC({
         nin,
         bvn,
+        first_name: first,
+        last_name: last,
         full_name: fullName,
+        phone,
         dob: formattedDob,
         gender,
         address,
@@ -145,14 +164,35 @@ export const Step1KYC: React.FC = () => {
 
       {/* Full Name */}
       <div className="flex flex-col gap-1.5">
-        <label className="font-dm text-[13px] text-zovu-text-light font-medium">Full Name</label>
+        <label className="font-dm text-[13px] text-zovu-text-light font-medium" htmlFor="kyc-full-name">Full Name</label>
         <input
+          id="kyc-full-name"
           type="text"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-          placeholder="As it appears on your ID"
+          placeholder="As it appears on your ID (first & last)"
           className="w-full bg-transparent border border-zovu-border rounded-[8px] font-dm text-[14px] text-zovu-text-light px-4 py-3 outline-none focus:border-zovu-primary transition-colors"
         />
+        {fullName.trim().length > 0 && fullName.trim().split(/\s+/).length < 2 && (
+          <span className="font-dm text-[11px] text-red-400">Enter both first and last name</span>
+        )}
+      </div>
+
+      {/* Phone */}
+      <div className="flex flex-col gap-1.5">
+        <label className="font-dm text-[13px] text-zovu-text-light font-medium" htmlFor="kyc-phone">Phone Number</label>
+        <input
+          id="kyc-phone"
+          type="tel"
+          inputMode="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="080… or +234…"
+          className="w-full bg-transparent border border-zovu-border rounded-[8px] font-dm text-[14px] text-zovu-text-light px-4 py-3 outline-none focus:border-zovu-primary transition-colors"
+        />
+        {phone.length > 0 && !phoneValid && (
+          <span className="font-dm text-[11px] text-red-400">Use a Nigerian number — 11 digits starting with 0 or +234…</span>
+        )}
       </div>
 
       {/* DOB & Gender */}
