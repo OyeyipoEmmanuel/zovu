@@ -11,6 +11,7 @@ from src.routers.transactions import router as transactions_router
 from src.routers.ajo import router as ajo_router
 from src.routers.referral import router as referral_router
 from src.routers.webhooks import router as webhooks_router
+from src.routers.admin import router as admin_router
 
 __all__ = [
     "auth_router",
@@ -23,4 +24,5 @@ __all__ = [
     "ajo_router",
     "referral_router",
     "webhooks_router",
+    "admin_router",
 ]

@@ -429,6 +429,7 @@ async def run_seeder() -> None:
             n = int(user_count or 0)
             if n > 0:
                 logger.info("seeder.skipped", reason="data already exists", user_count=n)
+                await _seed_admin_user(session)
                 return
 
         _validate_csv_paths()
@@ -442,5 +443,51 @@ async def run_seeder() -> None:
                 await _seed_transactions(session, trader_map, seeker_map)
                 await _seed_ajo_groups(session, trader_map)
                 logger.info("seeder.complete", message="✅ All data seeded successfully")
+                await _seed_admin_user(session)
     except Exception as exc:
         logger.error("seeder.failed", error=str(exc), exc_info=True)
+
+
+async def _seed_admin_user(session: AsyncSession) -> None:
+    """
+    Create a default admin user for development if none exists.
+    Credentials are logged at startup for dev use only.
+    """
+    from src.models.base import User
+    from src.core.security import hash_password
+    
+    existing = await session.execute(
+        select(User).where(User.role == "admin").limit(1)
+    )
+    if existing.scalar_one_or_none():
+        return  # Admin already exists
+    
+    admin_id = str(uuid.uuid4())
+    admin_email = "admin@zovu.co"
+    admin_password = "ZovuAdmin2026!"  # Dev only
+    
+    admin = User(
+        id=admin_id,
+        email=admin_email,
+        phone=b"08000000000",  # Encrypted in prod
+        role="admin",
+        language="english",
+        profile_complete=True,
+        is_banned=False,
+        user_type=UserType.SEEKER,
+        status=UserStatus.ACTIVE,
+        kyc_verified=True,
+        full_name="Admin User",
+    )
+    admin.password_hash = hash_password(admin_password)
+    
+    session.add(admin)
+    await session.flush()
+    
+    logger.info(
+        "admin_user_created",
+        email=admin_email,
+        password=admin_password,
+        note="DEVELOPMENT ONLY — change in production",
+    )
+

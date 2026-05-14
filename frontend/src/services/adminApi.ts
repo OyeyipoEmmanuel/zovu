@@ -1,0 +1,112 @@
+/**
+ * Admin API client service
+ * All admin endpoints using TanStack Query compatible request format
+ */
+import { request } from "@/lib/api";
+
+// ── COMPLAINTS ────────────────────────────────────
+export const adminComplaintsAPI = {
+  list: (params: {
+    status?: string;
+    urgency?: string;
+    category?: string;
+    limit?: number;
+    cursor?: string;
+  }) => request("/admin/complaints", { params }),
+
+  get: (id: string) => request(`/admin/complaints/${id}`),
+
+  verifySquad: (id: string) =>
+    request(`/admin/complaints/${id}/verify-squad`, { method: "POST" }),
+
+  update: (id: string, body: any) =>
+    request(`/admin/complaints/${id}`, { method: "PATCH", body }),
+
+  getStats: () => request("/admin/complaints/stats"),
+};
+
+// ── FRAUD ──────────────────────────────────────────
+export const adminFraudAPI = {
+  getFlaggedUsers: (params: {
+    reason?: string;
+    min_score?: number;
+    status?: string;
+    limit?: number;
+    cursor?: string;
+  }) => request("/admin/users/flagged", { params }),
+
+  flagUser: (userId: string, body: any) =>
+    request(`/admin/users/${userId}/flag`, { method: "POST", body }),
+
+  pauseUser: (userId: string, body: any) =>
+    request(`/admin/users/${userId}/pause`, { method: "POST", body }),
+
+  unpauseUser: (userId: string) =>
+    request(`/admin/users/${userId}/unpause`, { method: "POST" }),
+
+  deleteUser: (userId: string, body: any) =>
+    request(`/admin/users/${userId}`, { method: "DELETE", body }),
+
+  getAnalytics: (days?: number) =>
+    request(`/admin/fraud/analytics?days=${days || 30}`),
+};
+
+// ── METRICS ────────────────────────────────────────
+export const adminMetricsAPI = {
+  getOverview: () => request("/admin/metrics/overview"),
+
+  getUsers: (days?: number) =>
+    request(`/admin/metrics/users?period_days=${days || 30}`),
+
+  getTransactions: (days?: number) =>
+    request(`/admin/metrics/transactions?period_days=${days || 30}`),
+
+  getBusinesses: () => request("/admin/metrics/businesses"),
+
+  getDailyReport: (date: string) =>
+    request(`/admin/reports/daily?date=${date}`),
+};
+
+// ── PARTNERSHIPS ───────────────────────────────────
+export const adminPartnershipsAPI = {
+  listRequests: (params?: any) =>
+    request("/admin/partnerships/requests", { params }),
+
+  getRequest: (id: string) => request(`/admin/partnerships/requests/${id}`),
+
+  updateRequest: (id: string, body: any) =>
+    request(`/admin/partnerships/requests/${id}`, { method: "PATCH", body }),
+
+  approveRequest: (id: string) =>
+    request(`/admin/partnerships/requests/${id}/approve`, { method: "POST" }),
+
+  rejectRequest: (id: string, body: any) =>
+    request(`/admin/partnerships/requests/${id}/reject`, {
+      method: "POST",
+      body,
+    }),
+
+  listActive: (params?: any) => request("/admin/partnerships", { params }),
+
+  updatePartnership: (id: string, body: any) =>
+    request(`/admin/partnerships/${id}`, { method: "PUT", body }),
+};
+
+// ── AUDIT ──────────────────────────────────────────
+export const adminAuditAPI = {
+  getLog: (params: {
+    admin_id?: string;
+    action?: string;
+    target_type?: string;
+    limit?: number;
+    cursor?: string;
+  }) => request("/admin/audit-log", { params }),
+};
+
+// ── PUBLIC (no auth) ───────────────────────────────
+export const publicAPI = {
+  applyPartnership: (body: any) =>
+    request("/partnerships/apply", { method: "POST", body }),
+
+  getPublicPartners: () => request("/partnerships/public"),
+};

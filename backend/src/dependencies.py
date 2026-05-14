@@ -165,3 +165,21 @@ async def get_optional_user(
     except Exception as e:
         logger.warning("optional_auth_failed", error=str(e))
         return None
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    """
+    Dependency for admin-only endpoints.
+    Verifies user has role == 'admin'.
+    Returns 403 if not admin.
+    """
+    if user.role != "admin":
+        logger.warning("admin_access_denied", user_id=user.id, user_role=user.role)
+        raise ZovuAPIError(
+            status_code=403,
+            code="ADMIN_REQUIRED",
+            message="Admin access required",
+            error_field=None,
+        )
+    return user
+

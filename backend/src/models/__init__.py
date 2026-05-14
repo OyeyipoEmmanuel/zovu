@@ -27,6 +27,14 @@ from src.models.base import (
     EconomicContext,
     ShieldStatus,
 )
+from src.models.admin import (
+    Complaint,
+    ComplaintAttachment,
+    UserFlag,
+    PartnershipRequest,
+    Partnership,
+    AdminAuditLog,
+)
 
 __all__ = [
     "Base",
@@ -55,4 +63,10 @@ __all__ = [
     "GigStatus",
     "EconomicContext",
     "ShieldStatus",
+    "Complaint",
+    "ComplaintAttachment",
+    "UserFlag",
+    "PartnershipRequest",
+    "Partnership",
+    "AdminAuditLog",
 ]

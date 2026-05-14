@@ -198,6 +198,7 @@ def create_app() -> FastAPI:
         ajo_router,
         referral_router,
         webhooks_router,
+        admin_router,
     )
     
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
@@ -210,6 +211,7 @@ def create_app() -> FastAPI:
     app.include_router(ajo_router, prefix="/api/v1/ajo", tags=["Ajo"])
     app.include_router(referral_router, prefix="/api/v1/referral", tags=["Referral"])
     app.include_router(webhooks_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
+    app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
     
     logger.info("application_created", routes=len(app.routes))
     return app
