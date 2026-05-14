@@ -3,7 +3,6 @@ Transactions router — list transactions with cursor-based pagination.
 """
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, Query, HTTPException
-from ..services.mock_data import get_mock_transactions
 # pyrefly: ignore [missing-import]
 from sqlalchemy.ext.asyncio import AsyncSession
 # pyrefly: ignore [missing-import]
@@ -20,6 +19,7 @@ from src.models import User, Transaction
 from src.services.squad import SquadService
 # pyrefly: ignore [missing-import]
 from src.core.exceptions import ExternalServiceError
+from src.core.utils import mask_account_number, format_naira
 # pyrefly: ignore [missing-import]
 import structlog
 # pyrefly: ignore [missing-import]
@@ -110,21 +110,35 @@ async def list_transactions(
             json.dumps(cursor_data).encode()
         ).decode()
     
+    _inflow_types = {"credit_deposit", "loan_disbursement", "ajo_payout"}
+
+    def _enrich(t) -> dict:
+        direction = "inflow" if t.direction == "credit" else "outflow"
+        amount_display = format_naira(t.amount or 0)
+        feed_label = (
+            f"Received {amount_display} into your ZOVU virtual account"
+            if direction == "inflow"
+            else f"Sent {amount_display} from your ZOVU virtual account"
+        )
+        return {
+            "id": t.id,
+            "sender_id": t.sender_id,
+            "receiver_id": t.receiver_id,
+            "transaction_type": t.transaction_type,
+            "amount": t.amount,
+            "amount_display": amount_display,
+            "status": t.status,
+            "squad_reference": t.squad_reference,
+            "loan_id": t.loan_id,
+            "direction": direction,
+            "masked_account": mask_account_number(user.squad_account_number or ""),
+            "feed_label": feed_label,
+            "counterparty_display": None,
+            "created_at": t.created_at.isoformat(),
+        }
+
     return {
-        "items": [
-            {
-                "id": t.id,
-                "sender_id": t.sender_id,
-                "receiver_id": t.receiver_id,
-                "transaction_type": t.transaction_type,
-                "amount": t.amount,
-                "status": t.status,
-                "squad_reference": t.squad_reference,
-                "loan_id": t.loan_id,
-                "created_at": t.created_at.isoformat(),
-            }
-            for t in transactions
-        ],
+        "items": [_enrich(t) for t in transactions],
         "total": len(transactions),
         "cursor": next_cursor,
         "has_more": has_more,
@@ -158,24 +172,32 @@ async def get_transaction(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
     
+    direction = "inflow" if transaction.direction == "credit" else "outflow"
+    amount_display = format_naira(transaction.amount or 0)
+    feed_label = (
+        f"Received {amount_display} into your ZOVU virtual account"
+        if direction == "inflow"
+        else f"Sent {amount_display} from your ZOVU virtual account"
+    )
+
     return {
         "id": transaction.id,
         "sender_id": transaction.sender_id,
         "receiver_id": transaction.receiver_id,
         "transaction_type": transaction.transaction_type,
         "amount": transaction.amount,
+        "amount_display": amount_display,
         "status": transaction.status,
         "squad_reference": transaction.squad_reference,
         "loan_id": transaction.loan_id,
+        "direction": direction,
+        "masked_account": mask_account_number(user.squad_account_number or ""),
+        "feed_label": feed_label,
+        "counterparty_display": None,
         "metadata": transaction.tx_metadata,
         "created_at": transaction.created_at.isoformat(),
         "updated_at": transaction.updated_at.isoformat(),
     }
-
-@router.get("/mock-data")
-async def read_mock_transactions():
-    return get_mock_transactions()
-
 
 # ------------------------------------------------------------------ #
 #  Payment schemas                                                     #

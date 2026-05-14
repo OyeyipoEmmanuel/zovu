@@ -9,6 +9,10 @@ from src.models.base import (
     Loan,
     Transaction,
     Job,
+    Gig,
+    GigApplication,
+    LenderUnlock,
+    JobRecommendation,
     Ajo,
     AjoMembership,
     Referral,
@@ -19,6 +23,9 @@ from src.models.base import (
     TransactionType,
     LoanStatus,
     AjoStatus,
+    GigStatus,
+    EconomicContext,
+    ShieldStatus,
 )
 
 __all__ = [
@@ -31,6 +38,10 @@ __all__ = [
     "Loan",
     "Transaction",
     "Job",
+    "Gig",
+    "GigApplication",
+    "LenderUnlock",
+    "JobRecommendation",
     "Ajo",
     "AjoMembership",
     "Referral",
@@ -41,4 +52,7 @@ __all__ = [
     "TransactionType",
     "LoanStatus",
     "AjoStatus",
+    "GigStatus",
+    "EconomicContext",
+    "ShieldStatus",
 ]

@@ -7,8 +7,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.models import User, PulseScore
 import structlog
+import asyncio
+from celery import shared_task
 
 logger = structlog.get_logger()
+
+
+@shared_task(queue="low", name="workers.credit_tasks.update_activity_feed_cache")
+def update_activity_feed_cache() -> dict:
+    """Invalidate Redis activity feed cache keys after credit or transaction updates."""
+    async def _run():
+        try:
+            from src.core.redis_client import redis_client
+            redis = await redis_client.get_pool(0)
+            keys = await redis.keys("activity_feed:*")
+            if keys:
+                await redis.delete(*keys)
+            logger.info("activity_feed_cache_invalidated", count=len(keys))
+            return {"deleted": len(keys)}
+        except Exception as e:
+            logger.warning("activity_feed_cache_invalidation_failed", error=str(e))
+            return {"deleted": 0}
+    return asyncio.run(_run())
 
 
 @celery_app.task(
