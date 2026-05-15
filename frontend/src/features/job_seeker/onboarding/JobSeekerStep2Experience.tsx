@@ -92,9 +92,9 @@ export const JobSeekerStep2Experience = () => {
         currentlyEmployed: employed,
         workHistory: workHistory
       });
-      setCurrentStep('cv');
+      setCurrentStep('preferences');
       
-      navigate('/dashboard/job-seeker/onboarding/cv');
+      navigate('/dashboard/job-seeker/onboarding/preferences');
     } catch (err: any) {
       setError(err.detail || 'Failed to save experience. Please try again.');
     } finally {

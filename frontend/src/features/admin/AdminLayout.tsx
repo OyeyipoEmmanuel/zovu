@@ -31,30 +31,30 @@ export const AdminLayout: React.FC = () => {
   const navItems: NavItem[] = [
     {
       label: "Overview",
-      icon: "📊",
+      icon: "",
       path: "/admin",
       badge: undefined,
     },
     {
       label: "Complaints",
-      icon: "🗂️",
+      icon: "",
       path: "/admin/complaints",
       badge: alerts.unresolved_complaints,
     },
     {
       label: "Fraud Management",
-      icon: "🚨",
+      icon: "",
       path: "/admin/fraud",
       badge: alerts.new_fraud_flags,
     },
     {
       label: "Metrics",
-      icon: "📈",
+      icon: "",
       path: "/admin/metrics",
     },
     {
       label: "Partnerships",
-      icon: "🤝",
+      icon: "",
       path: "/admin/partnerships",
       badge: alerts.pending_partnerships,
     },
@@ -65,7 +65,7 @@ export const AdminLayout: React.FC = () => {
     },
     {
       label: "Audit Log",
-      icon: "📋",
+      icon: "",
       path: "/admin/audit",
     },
   ];

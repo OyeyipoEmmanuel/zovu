@@ -507,7 +507,7 @@ export const JobSeekerRoutes = (
         <Route index element={<Navigate to="skills" replace />} />
         <Route path="skills" element={<JobSeekerStep1Skills />} />
         <Route path="experience" element={<JobSeekerStep2Experience />} />
-        <Route path="cv" element={<JobSeekerStep3CV />} />
+        {/* <Route path="cv" element={<JobSeekerStep3CV />} /> */}
         <Route path="preferences" element={<JobSeekerStep4Preferences />} />
         <Route path="success" element={<JobSeekerOnboardingSuccess />} />
       </Route>
