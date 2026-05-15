@@ -40,10 +40,13 @@ export interface RegisterResponse {
 export interface KycPayload {
   first_name: string;
   last_name: string;
+  middle_name?: string;
   date_of_birth: string;
   phone: string;
   bvn?: string;
   nin?: string;
+  gender?: '1' | '2';
+  address?: string;
 }
 
 /** Normalize Nigerian phone numbers to +234xxxxxxxxxx format */
@@ -110,8 +113,18 @@ export const logout = () =>
 export const getMe = () =>
   api.get<AuthUser>('/auth/me', true).then(normalizeAuthUser);
 
+export interface KycResponse {
+  status: string;
+  message: string;
+  kyc_verified: boolean;
+  profile_complete: boolean;
+  squad_provisioned: boolean;
+  account_number: string | null;
+  bank: string | null;
+}
+
 export const submitKyc = (payload: KycPayload) =>
-  api.post<{ status: string; message: string }>(
+  api.post<KycResponse>(
     '/auth/kyc',
     { ...payload, phone: normalizePhone(payload.phone) },
     true,

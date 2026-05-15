@@ -171,14 +171,59 @@ class ComplaintService:
         if not complaint:
             raise ZovuAPIError(404, "COMPLAINT_NOT_FOUND", "Complaint not found")
 
-        # TODO: Call Squad API with transaction reference
-        # For now, return mock response
-        squad_response = {
-            "transaction_found": True,
-            "squad_status": "completed",
-            "sender_debited": True,
-            "recipient_credited": True,
-        }
+        # Look up the transaction so we have a squad_reference to query
+        tx = await self.db.get(Transaction, complaint.transaction_id)
+        if not tx:
+            raise ZovuAPIError(404, "TRANSACTION_NOT_FOUND", "Transaction for complaint not found")
+
+        reference = tx.squad_reference
+        squad_response: dict
+        if not reference:
+            squad_response = {
+                "transaction_found": False,
+                "squad_status": "no_reference",
+                "sender_debited": False,
+                "recipient_credited": False,
+                "note": "Local transaction has no Squad reference — likely an internal ledger entry.",
+            }
+        else:
+            import httpx
+            from src.services.squad import SquadService
+            from src.core.exceptions import ExternalServiceError
+
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as http:
+                    squad = SquadService(http=http, db=self.db, redis=self.redis)
+                    verify = await squad.verify_transaction(reference)
+                squad_status = (verify.get("status") or "unknown").lower()
+                completed = squad_status in ("success", "successful", "completed", "processed", "settled")
+                squad_response = {
+                    "transaction_found": True,
+                    "squad_status": squad_status,
+                    "sender_debited": completed and tx.sender_id is not None,
+                    "recipient_credited": completed and tx.receiver_id is not None,
+                    "gateway_ref": verify.get("gateway_ref"),
+                    "squad_amount": verify.get("amount"),
+                    "local_amount_kobo": tx.amount,
+                    "amount_match": verify.get("amount") is None or int(verify.get("amount") or 0) == int(tx.amount_gross or tx.amount or 0),
+                }
+            except ExternalServiceError as exc:
+                squad_response = {
+                    "transaction_found": False,
+                    "squad_status": "lookup_failed",
+                    "error": str(exc.detail),
+                    "sender_debited": False,
+                    "recipient_credited": False,
+                }
+            except Exception as exc:  # network errors / unexpected
+                logger.error("complaint_squad_verify_failed", complaint_id=complaint_id, error=str(exc))
+                squad_response = {
+                    "transaction_found": False,
+                    "squad_status": "lookup_error",
+                    "error": str(exc),
+                    "sender_debited": False,
+                    "recipient_credited": False,
+                }
 
         complaint.squad_verified_at = datetime.now(timezone.utc)
         complaint.squad_verification_result = squad_response
@@ -192,15 +237,20 @@ class ComplaintService:
             after_state={"squad_verified_at": complaint.squad_verified_at.isoformat()},
         )
 
+        await self.db.flush()
+
         return {
             "transaction_found": squad_response.get("transaction_found"),
             "squad_status": squad_response.get("squad_status"),
             "sender_debited": squad_response.get("sender_debited"),
             "recipient_credited": squad_response.get("recipient_credited"),
+            "amount_match": squad_response.get("amount_match"),
+            "gateway_ref": squad_response.get("gateway_ref"),
             "mismatch_with_complaint": not (
                 squad_response.get("sender_debited") and squad_response.get("recipient_credited")
             ),
             "verified_at": complaint.squad_verified_at.isoformat(),
+            "raw": squad_response,
         }
 
     async def update_complaint(

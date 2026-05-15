@@ -159,6 +159,46 @@ class AuthService:
         # 7. Send OTP email
         await self._send_otp_email(user, otp_code)
 
+        # 8. Notify admin when a partner/lender signs up (fire-and-forget)
+        if role == "lender":
+            try:
+                from src.services.email_service import EmailService
+                svc = EmailService()
+                admin_to = (settings.ADMIN_EMAIL or "").strip().lower()
+                if admin_to:
+                    html = (
+                        "<html><body style='font-family:DM Sans,sans-serif;'>"
+                        f"<h2>New {role} signup</h2>"
+                        f"<p><b>Email:</b> {email}</p>"
+                        f"<p><b>Company:</b> {company_name or '—'}</p>"
+                        f"<p><b>User ID:</b> {user.id}</p>"
+                        "<p>Review them in the admin dashboard under Partnerships.</p>"
+                        "</body></html>"
+                    )
+                    await svc._send(admin_to, f"[Zovu] New {role} signup — {company_name or email}", html)
+
+                # Also create a dashboard audit log entry so it surfaces in the admin UI.
+                from src.models.admin import AdminAuditLog
+                audit = AdminAuditLog(
+                    admin_id=user.id,  # self-action; surfaces source user
+                    admin_email=email,
+                    action="user.signed_up",
+                    target_type="user",
+                    target_id=user.id,
+                    before_state={},
+                    after_state={
+                        "role": role,
+                        "email": email,
+                        "company_name": company_name,
+                        "business_name": business_name,
+                        "full_name": full_name,
+                    },
+                )
+                self.db.add(audit)
+                await self.db.commit()
+            except Exception as exc:
+                logger.warning("admin_signup_notification_failed", user_id=user.id, error=str(exc))
+
         response: dict = {
             "message": "OTP sent to your email",
             "email": email,
@@ -234,10 +274,12 @@ class AuthService:
 
         logger.info("email_verified", user_id=user.id, email=email)
 
-        # 6. Provision Squad VA (non-fatal failure — Celery fallback)
-        await self._provision_squad(user)
+        # Squad VA is *not* provisioned here. Squad's /virtual-account requires
+        # a real 11-digit BVN and mobile number, neither of which exist until
+        # the user completes KYC. Provisioning is triggered from the KYC route.
 
-        # 7. Send welcome email (fire-and-forget)
+        # 6. Send welcome email (fire-and-forget). Account number is null at
+        #    this point — the welcome email shouldn't promise one.
         try:
             from src.services.email_service import EmailService
             svc = EmailService()
@@ -249,7 +291,7 @@ class AuthService:
         except Exception as exc:
             logger.warning("welcome_email_failed", user_id=user.id, error=str(exc))
 
-        # 8. Issue tokens
+        # 7. Issue tokens
         return await self._generate_tokens(user)
 
     # ------------------------------------------------------------------ #
@@ -485,35 +527,6 @@ class AuthService:
             )
         except Exception as exc:
             logger.warning("otp_email_failed", user_id=user.id, error=str(exc))
-
-    async def _provision_squad(self, user: User) -> None:
-        """
-        Attempt Squad VA creation. On failure: queue Celery retry, do NOT raise.
-        """
-        try:
-            import httpx
-            from src.services.squad import SquadService
-            async with httpx.AsyncClient(timeout=30.0) as http:
-                squad = SquadService(http=http, db=self.db, redis=self.redis)
-                await squad.create_virtual_account(user)
-        except Exception as exc:
-            logger.error(
-                "squad_provisioning_failed_queueing_retry",
-                user_id=user.id,
-                error=str(exc),
-            )
-            user.squad_provisioned = False
-            await self.db.commit()
-            # Queue Celery retry
-            try:
-                from src.workers.squad_tasks import retry_squad_provisioning
-                retry_squad_provisioning.apply_async(
-                    args=[user.id],
-                    queue="critical",
-                    countdown=10,
-                )
-            except Exception as celery_exc:
-                logger.error("celery_queue_failed", user_id=user.id, error=str(celery_exc))
 
     async def _generate_tokens(
         self,

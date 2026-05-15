@@ -165,10 +165,13 @@ class UserKYCSchema(BaseModel):
     """KYC submission. bvn and nin are optional individually but at least one is required."""
     first_name: str = Field(..., min_length=2)
     last_name: str = Field(..., min_length=2)
+    middle_name: Optional[str] = Field(None, max_length=100)
     date_of_birth: datetime
     phone: str = Field(..., pattern=r"^\+?234\d{10}$")
     bvn: Optional[str] = Field(None, min_length=11, max_length=11)
     nin: Optional[str] = Field(None, min_length=11, max_length=11)
+    gender: Optional[str] = Field(None, pattern=r"^[12]$")
+    address: Optional[str] = Field(None, max_length=255)
 
     @model_validator(mode='after')
     def at_least_one_id(self):

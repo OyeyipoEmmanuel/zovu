@@ -69,8 +69,9 @@ export const Step1KYC: React.FC = () => {
       if (res.kyc_complete) {
         updateUser({
           kycComplete: true,
-          squadVaNumber: res.squad_va_number,
-          squadVaBank: res.squad_va_bank,
+          squad_provisioned: res.squad_provisioned,
+          squadVaNumber: res.squad_va_number || null,
+          squadVaBank: res.squad_va_bank || null,
         });
         navigate('/dashboard/trader/complete-profile/business');
       }

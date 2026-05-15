@@ -10,10 +10,12 @@ import {
   HiOutlineCog,
   HiOutlineMenu,
   HiOutlineX,
+  HiOutlineCurrencyDollar,
 } from 'react-icons/hi';
 
 const navItems = [
   { to: '/dashboard/trader', icon: HiOutlineHome, label: 'Home', end: true },
+  { to: '/dashboard/trader/ajo', icon: HiOutlineCurrencyDollar, label: 'Ajo' },
   { to: '/dashboard/trader/transactions', icon: HiOutlineSwitchHorizontal, label: 'Transactions' },
   { to: '/dashboard/trader/pulse', icon: HiOutlineChartBar, label: 'Pulse Score' },
   { to: '/dashboard/trader/gig/post', icon: HiOutlinePlusCircle, label: 'Post a Gig' },
@@ -117,7 +119,7 @@ export const TraderLayout: React.FC = () => {
 
       {/* Mobile Bottom Nav */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-zovu-surface-1/95 backdrop-blur-md border-t border-zovu-border">
-        <div className="grid grid-cols-6 px-1 py-1">
+        <div className="grid grid-cols-7 px-1 py-1">
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={mobileLinkClass}>
               <item.icon size={20} />

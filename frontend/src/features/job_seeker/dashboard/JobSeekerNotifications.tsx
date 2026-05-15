@@ -46,12 +46,12 @@ export const JobSeekerNotifications: React.FC = () => {
     setMarking(true);
     try {
       await jobSeekerAPI.markNotificationsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, unread: false })));
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     } catch { /* silent */ }
     finally { setMarking(false); }
   };
 
-  const unreadCount = notifications.filter(n => n.unread).length;
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const tabs = ['all', 'job', 'payment', 'score'] as const;
   const tabLabels: Record<string, string> = {
@@ -125,7 +125,7 @@ export const JobSeekerNotifications: React.FC = () => {
             <div
               key={notif.id}
               className={`flex items-start gap-3 p-4 rounded-[12px] border transition-colors ${
-                notif.unread
+                !notif.read
                   ? 'bg-[#1A6B4A]/5 border-[#1A6B4A]/20'
                   : 'bg-zovu-surface-1 border-zovu-border hover:bg-zovu-surface-2/30'
               }`}
@@ -135,11 +135,11 @@ export const JobSeekerNotifications: React.FC = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className={`font-dm text-[14px] ${notif.unread ? 'text-zovu-text-light font-bold' : 'text-zovu-text-light font-medium'}`}>{notif.title}</h3>
-                  {notif.unread && <div className="w-2.5 h-2.5 rounded-full bg-[#1A6B4A] flex-shrink-0 mt-1.5" />}
+                  <h3 className={`font-dm text-[14px] ${!notif.read ? 'text-zovu-text-light font-bold' : 'text-zovu-text-light font-medium'}`}>{notif.title}</h3>
+                  {!notif.read && <div className="w-2.5 h-2.5 rounded-full bg-[#1A6B4A] flex-shrink-0 mt-1.5" />}
                 </div>
                 <p className="font-dm text-[13px] text-zovu-text mt-1 leading-relaxed">{notif.body}</p>
-                <span className="font-dm text-[11px] text-zovu-text/60 mt-2 inline-block">{notif.time}</span>
+                <span className="font-dm text-[11px] text-zovu-text/60 mt-2 inline-block">{notif.created_at ? new Date(notif.created_at).toLocaleString() : ''}</span>
               </div>
             </div>
           ))}

@@ -204,7 +204,6 @@ class User(Base):
     ban_reason: Mapped[str | None] = mapped_column(Text)
 
     # Squad integration
-    squad_virtual_account_id: Mapped[str | None] = mapped_column(String(100))
     squad_account_id: Mapped[str | None] = mapped_column(String(100))  # from Squad response
     squad_account_number: Mapped[str | None] = mapped_column(String(20))
     squad_account_bank: Mapped[str | None] = mapped_column(String(100))
@@ -542,17 +541,19 @@ class JobRecommendation(Base):
 class Ajo(Base):
     """Ajo savings group model."""
     __tablename__ = "ajos"
-    
+
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     organizer_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
-    contribution_amount: Mapped[int] = mapped_column(Integer)  # KOBO — fixed per member
+    contribution_amount: Mapped[int] = mapped_column(Integer)  # KOBO — minimum deposit per member
     contribution_frequency: Mapped[str] = mapped_column(String(50))  # weekly | biweekly | monthly
     total_balance: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # KOBO
     max_members: Mapped[int] = mapped_column(Integer)
     status: Mapped[AjoStatus] = mapped_column(SQLEnum(AjoStatus), default=AjoStatus.ACTIVE)
     payout_schedule: Mapped[list | None] = mapped_column(JSON)  # Array of member order
+    end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    merchant_squad_account: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -630,6 +631,50 @@ class PulseScore(Base):
     __table_args__ = (
         Index("ix_pulse_scores_user_id", "user_id"),
         Index("ix_pulse_scores_calculation_timestamp", "calculation_timestamp"),
+    )
+
+
+class LenderServiceOffering(Base):
+    """A product (loan / insurance / savings) offered by a lender/partner."""
+    __tablename__ = "lender_service_offerings"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lender_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    type: Mapped[str] = mapped_column(String(30), nullable=False)  # loan | insurance | savings
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    min_pulse_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    max_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)  # KOBO
+    interest_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    premium_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)  # KOBO
+    repayment_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active")  # active | archived
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_lender_service_offerings_lender_id", "lender_id"),
+        Index("ix_lender_service_offerings_type", "type"),
+    )
+
+
+class AjoTransaction(Base):
+    """Per-Ajo-group transaction record (admin + user dashboard history)."""
+    __tablename__ = "ajo_transactions"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    ajo_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("ajos.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # KOBO
+    type: Mapped[str] = mapped_column(String(20), nullable=False)  # contribution | payout
+    status: Mapped[str] = mapped_column(String(20), default="completed", server_default="completed")
+    squad_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ajo_transactions_ajo_id", "ajo_id"),
+        Index("ix_ajo_transactions_user_id", "user_id"),
     )
 
 

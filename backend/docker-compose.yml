@@ -5,8 +5,15 @@ services:
       dockerfile: Dockerfile
     container_name: zovu_api
     command: uvicorn src.main:app --host 0.0.0.0 --port 4000 --reload
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: sqlite+aiosqlite:///./zovu.db
+      # The SQLite file lives in the named volume `zovu_sqlite` so file locking
+      # works (a Windows bind-mount breaks SQLite's fcntl locks → "disk I/O
+      # error" partway through CREATE TABLE). Both api and celery_worker mount
+      # the volume at /data and point DATABASE_URL at the same path, so they
+      # share state without each spawning their own ./data.db.
+      DATABASE_URL: sqlite+aiosqlite:////data/zovu_dev.db
       REDIS_URL: redis://redis:6379
       ENVIRONMENT: development
       DEBUG: "true"
@@ -19,6 +26,7 @@ services:
     volumes:
       - .:/app
       - ../AI-engineer/data:/AI-engineer/data:ro
+      - zovu_sqlite:/data
 
   redis:
     image: redis:7-alpine
@@ -36,9 +44,11 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: zovu_celery_worker
-    command: celery -A src.workers.celery_app worker --loglevel=info
+    command: celery -A src.workers.celery_app worker --loglevel=info -Q critical,default,low
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: sqlite+aiosqlite:///./zovu.db
+      DATABASE_URL: sqlite+aiosqlite:////data/zovu_dev.db
       REDIS_URL: redis://redis:6379
       ENVIRONMENT: development
       CSV_DATA_DIR: /AI-engineer/data
@@ -48,3 +58,7 @@ services:
     volumes:
       - .:/app
       - ../AI-engineer/data:/AI-engineer/data:ro
+      - zovu_sqlite:/data
+
+volumes:
+  zovu_sqlite:

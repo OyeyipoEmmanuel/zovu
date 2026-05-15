@@ -7,8 +7,10 @@ from pydantic import BaseModel
 
 from src.core.database import get_db
 from src.dependencies import get_current_user
-from src.models import User
+from src.models import User, LenderServiceOffering
 from src.services.LenderService import LenderService
+from src.core.exceptions import ZovuAPIError
+from sqlalchemy import select, and_
 import structlog
 
 logger = structlog.get_logger()
@@ -111,3 +113,124 @@ async def get_loan_stats(
     svc = LenderService(db)
     stats = await svc.get_loan_stats(user)
     return {"ok": True, "data": stats}
+
+
+# ── Service Offerings (lender's products) ─────────────────────────────────────
+
+
+def _require_lender_role(user: User) -> None:
+    role = (user.role or "").lower()
+    if role not in ("lender", "partner", "both", "admin"):
+        raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Lender role required")
+
+
+def _service_to_dict(svc: LenderServiceOffering) -> dict:
+    return {
+        "id": svc.id,
+        "lender_id": svc.lender_id,
+        "name": svc.name,
+        "type": svc.type,
+        "description": svc.description,
+        "min_pulse_score": svc.min_pulse_score,
+        "max_amount": svc.max_amount,
+        "interest_rate": svc.interest_rate,
+        "premium_amount": svc.premium_amount,
+        "repayment_days": svc.repayment_days,
+        "status": svc.status,
+        "created_at": svc.created_at.isoformat() if svc.created_at else None,
+    }
+
+
+class OfferServiceRequest(BaseModel):
+    name: str
+    type: str  # loan | insurance | savings
+    description: str | None = None
+    min_pulse_score: int = 0
+    max_amount: int | None = None  # kobo
+    interest_rate: float | None = None
+    premium_amount: int | None = None  # kobo
+    repayment_days: int | None = None
+
+
+class UpdateServiceRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    min_pulse_score: int | None = None
+    max_amount: int | None = None
+    interest_rate: float | None = None
+    premium_amount: int | None = None
+    repayment_days: int | None = None
+    status: str | None = None
+
+
+@router.post("/services/offer", response_model=dict, summary="Create a new service offering")
+async def offer_service(
+    payload: OfferServiceRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _require_lender_role(user)
+    if payload.type not in ("loan", "insurance", "savings"):
+        raise ZovuAPIError(status_code=400, code="INVALID_TYPE", message="type must be loan, insurance, or savings", field="type")
+
+    svc = LenderServiceOffering(
+        lender_id=user.id,
+        name=payload.name,
+        type=payload.type,
+        description=payload.description,
+        min_pulse_score=max(0, min(850, int(payload.min_pulse_score or 0))),
+        max_amount=payload.max_amount,
+        interest_rate=payload.interest_rate,
+        premium_amount=payload.premium_amount,
+        repayment_days=payload.repayment_days,
+        status="active",
+    )
+    db.add(svc)
+    await db.commit()
+    await db.refresh(svc)
+    return {"ok": True, "data": _service_to_dict(svc)}
+
+
+@router.get("/services", response_model=dict, summary="List my service offerings")
+async def list_services(
+    type: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _require_lender_role(user)
+    q = select(LenderServiceOffering).where(LenderServiceOffering.lender_id == user.id)
+    if type:
+        q = q.where(LenderServiceOffering.type == type)
+    rows = (await db.execute(q.order_by(LenderServiceOffering.created_at.desc()))).scalars().all()
+    return {"ok": True, "data": [_service_to_dict(s) for s in rows]}
+
+
+@router.get("/services/{service_id}", response_model=dict, summary="Get a service offering")
+async def get_service(
+    service_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _require_lender_role(user)
+    svc = await db.get(LenderServiceOffering, service_id)
+    if not svc or svc.lender_id != user.id:
+        raise ZovuAPIError(status_code=404, code="NOT_FOUND", message="Service offering not found")
+    return {"ok": True, "data": _service_to_dict(svc)}
+
+
+@router.patch("/services/{service_id}", response_model=dict, summary="Update a service offering")
+async def update_service(
+    service_id: str,
+    payload: UpdateServiceRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _require_lender_role(user)
+    svc = await db.get(LenderServiceOffering, service_id)
+    if not svc or svc.lender_id != user.id:
+        raise ZovuAPIError(status_code=404, code="NOT_FOUND", message="Service offering not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(svc, field, value)
+    await db.commit()
+    await db.refresh(svc)
+    return {"ok": True, "data": _service_to_dict(svc)}

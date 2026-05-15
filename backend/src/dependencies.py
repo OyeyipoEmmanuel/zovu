@@ -179,7 +179,7 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
             status_code=403,
             code="ADMIN_REQUIRED",
             message="Admin access required",
-            error_field=None,
+            field=None,
         )
     return user
 

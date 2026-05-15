@@ -18,12 +18,16 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for structured logging with request/trace IDs."""
     
     async def dispatch(self, request: Request, call_next: Callable) -> Callable:
-        # Generate request ID and trace ID
-        request_id = str(uuid.uuid4())
+        # Honour incoming X-Request-ID for distributed tracing; otherwise generate.
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         trace_id = request.headers.get("X-Trace-ID", request_id)
         user_id = request.headers.get("X-User-ID", "anonymous")
-        
-        # Bind context to structlog
+
+        # Make the id reachable from FastAPI exception handlers via request.state
+        request.state.request_id = request_id
+        request.state.trace_id = trace_id
+
+        # Bind context to structlog so every log line in this request carries the id
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(
             request_id=request_id,
@@ -47,18 +51,19 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
 
 
 class ErrorHandlerMiddleware(BaseHTTPMiddleware):
-    """Middleware to catch and format all exceptions."""
-    
+    """Middleware to catch and format all exceptions in the standard envelope."""
+
     async def dispatch(self, request: Request, call_next: Callable) -> Callable:
+        request_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
         try:
             return await call_next(request)
         except ZovuAPIError as exc:
-            request_id = str(uuid.uuid4())
             logger.warning(
                 "api_error",
                 code=exc.error_code,
                 status_code=exc.status_code,
                 field=exc.error_field,
+                request_id=request_id,
             )
             return JSONResponse(
                 status_code=exc.status_code,
@@ -73,16 +78,33 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 },
             )
         except ZovuException as exc:
-            logger.warning("zovu_exception", status_code=exc.status_code, detail=exc.detail)
+            logger.warning("zovu_exception", status_code=exc.status_code, detail=exc.detail, request_id=request_id)
+            # Normalize to standard envelope so the frontend never sees a bare `detail`.
             return JSONResponse(
                 status_code=exc.status_code,
-                content={"detail": exc.detail},
+                content={
+                    "ok": False,
+                    "error": {
+                        "code": "ZOVU_ERROR",
+                        "message": exc.detail,
+                        "field": None,
+                    },
+                    "request_id": request_id,
+                },
             )
         except Exception as exc:
-            logger.error("unhandled_exception", error=str(exc), exc_info=True)
+            logger.error("unhandled_exception", error=str(exc), request_id=request_id, exc_info=True)
             return JSONResponse(
                 status_code=500,
-                content={"detail": "Internal server error"},
+                content={
+                    "ok": False,
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "An unexpected error occurred. Please try again.",
+                        "field": None,
+                    },
+                    "request_id": request_id,
+                },
             )
 
 

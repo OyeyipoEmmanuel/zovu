@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     SQUAD_PUBLIC_KEY: str = ""   # Used for checkout initiation
     SQUAD_BASE_URL: str  # https://sandbox-api-d.squadco.com (dev) or https://api-d.squadco.com (prod)
     SQUAD_WEBHOOK_IP: str = ""  # Optional IP whitelist for Squad webhooks
+    # Single merchant virtual account that receives Ajo deposits. Configure in
+    # production via the AJO_SQUAD_MERCHANT_ACCOUNT env var.
+    AJO_SQUAD_MERCHANT_ACCOUNT: str = ""
+    SQUAD_MERCHANT_ACCOUNT_NUMBER: str = ""
     
     # External APIs (optional — warn at startup if missing)
     OPENAI_API_KEY: str = ""      # For Whisper voice transcription

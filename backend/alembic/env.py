@@ -6,6 +6,12 @@ from sqlalchemy import engine_from_config
 from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 import asyncio
+import sys
+import os
+
+# Add parent directory to path so src module can be imported
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from src.config import settings
 from src.models import Base
 
@@ -60,12 +66,19 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection):
     """Run migrations with connection object."""
+    # Detect database dialect (PostgreSQL vs SQLite)
+    dialect_name = connection.dialect.name
+    
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
         compare_server_default=True,
+        user_module_prefix='',
     )
+    
+    # Store dialect in context for access in migrations
+    context.config.attributes['sqlalchemy_dialect'] = dialect_name
 
     with context.begin_transaction():
         context.run_migrations()

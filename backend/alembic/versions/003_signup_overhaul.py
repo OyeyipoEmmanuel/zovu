@@ -21,6 +21,9 @@ def upgrade() -> None:
     All columns are nullable / have server defaults so this is
     safe to run against a live database without downtime.
     """
+    # Skip for SQLite - tables created by ORM on first startup
+    if op.get_context().dialect.name == 'sqlite':
+        return
 
     # ------------------------------------------------------------------ #
     #  users table                                                         #

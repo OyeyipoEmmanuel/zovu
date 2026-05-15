@@ -26,6 +26,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Skip for SQLite - tables created by ORM on first startup
+    if op.get_context().dialect.name == 'sqlite':
+        return
+    
     # 1. Add new nullable columns
     op.add_column(
         'transaction',

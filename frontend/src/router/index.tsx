@@ -31,6 +31,9 @@ import { JobSeekerGigHistory } from '../features/job_seeker/dashboard/JobSeekerG
 import { JobSeekerQRCheckin } from '../features/job_seeker/dashboard/JobSeekerQRCheckin';
 import { JobSeekerNotifications } from '../features/job_seeker/dashboard/JobSeekerNotifications';
 
+// Shared Ajo Tab
+import { AjoTab } from '../features/shared/AjoTab';
+
 // Admin Imports
 import { AdminGuard } from '../features/admin/AdminGuard';
 import { AdminLayout } from '../features/admin/AdminLayout';
@@ -43,26 +46,14 @@ import PartnershipManagement from '../features/admin/screens/PartnershipManageme
 import AuditLog from '../features/admin/screens/AuditLog';
 
 const PartnerProtectedRoute = () => {
-  // TODO: remove this in production
-  if (import.meta.env.DEV) {
-    return (
-      <div className="flex bg-zovu-background min-h-screen">
-        <PartnersSidebar />
-        <main className="flex-1 overflow-y-auto p-6 md:p-10">
-          <Outlet />
-        </main>
-      </div>
-    );
-  }
-
   const { user } = useAuthStore();
-  
+
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  const role = user.role as string;
-  if (role.toLowerCase() !== 'lender' && role.toLowerCase() !== 'both' && role.toLowerCase() !== 'partner') {
+  const role = (user.role as string || '').toLowerCase();
+  if (role !== 'lender' && role !== 'both' && role !== 'partner') {
     return <Navigate to="/dashboard/trader" replace />;
   }
 
@@ -96,6 +87,7 @@ export const PartnerRoutes = (
 const jsNavItems = [
   { to: '/dashboard/job-seeker', label: 'Home', icon: '🏠' },
   { to: '/dashboard/job-seeker/jobs', label: 'Jobs', icon: '💼' },
+  { to: '/dashboard/job-seeker/ajo', label: 'Ajo', icon: '🪙' },
   { to: '/dashboard/job-seeker/transactions', label: 'Transactions', icon: '💳' },
   { to: '/dashboard/job-seeker/pulse', label: 'Pulse Score', icon: '📊' },
   { to: '/dashboard/job-seeker/gig-history', label: 'Gig History', icon: '📋' },
@@ -158,43 +150,14 @@ const JobSeekerBottomNav = () => {
 const JobSeekerProtectedRoute = () => {
   const { kycComplete, squadVaCreated, setRedirectReason } = useJobSeekerStore();
   const location = useLocation();
-
-  // In dev mode, skip auth — same pattern as trader dashboard
-  if (import.meta.env.DEV) {
-    // Route-level guards for sensitive routes
-    const path = location.pathname;
-    if (path === '/dashboard/job-seeker/transactions' && !squadVaCreated) {
-      setRedirectReason('Complete KYC to view transactions');
-      return <Navigate to="/dashboard/job-seeker" replace />;
-    }
-    if (path === '/dashboard/job-seeker/loans' && (!kycComplete || !squadVaCreated)) {
-      setRedirectReason(!kycComplete ? 'Complete KYC to apply for loans' : 'Set up your Zovu account to apply for loans');
-      return <Navigate to="/dashboard/job-seeker" replace />;
-    }
-    if (path === '/dashboard/job-seeker/insurance' && !kycComplete) {
-      setRedirectReason('Complete KYC to apply for insurance');
-      return <Navigate to="/dashboard/job-seeker" replace />;
-    }
-
-    return (
-      <div className="bg-[#0D0D0D] min-h-screen text-white flex">
-        <JobSeekerSidebar />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
-          <Outlet />
-        </main>
-        <JobSeekerBottomNav />
-      </div>
-    );
-  }
-
   const { user } = useAuthStore();
 
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  const role = user.role as string;
-  if (role.toLowerCase() !== 'job_seeker' && role.toLowerCase() !== 'both') {
+  const role = (user.role as string || '').toLowerCase();
+  if (role !== 'job_seeker' && role !== 'both') {
     return <Navigate to="/dashboard/trader" replace />;
   }
 
@@ -233,23 +196,14 @@ const JobSeekerProtectedRoute = () => {
 // ─── Job Seeker Onboarding Protected Route (no sidebar) ─────
 
 const JobSeekerOnboardingProtectedRoute = () => {
-  // TODO: remove this in production
-  if (import.meta.env.DEV) {
-    return (
-      <div className="bg-[#0D0D0D] min-h-screen text-white">
-        <Outlet />
-      </div>
-    );
-  }
-
   const { user } = useAuthStore();
 
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  const role = user.role as string;
-  if (role.toLowerCase() !== 'job_seeker' && role.toLowerCase() !== 'both') {
+  const role = (user.role as string || '').toLowerCase();
+  if (role !== 'job_seeker' && role !== 'both') {
     return <Navigate to="/dashboard/trader" replace />;
   }
 
@@ -529,6 +483,7 @@ export const JobSeekerRoutes = (
     <Route element={<JobSeekerProtectedRoute />}>
       <Route path="/dashboard/job-seeker" element={<JobSeekerDashboard />} />
       <Route path="/dashboard/job-seeker/jobs" element={<JobSeekerJobs />} />
+      <Route path="/dashboard/job-seeker/ajo" element={<AjoTab />} />
       <Route path="/dashboard/job-seeker/transactions" element={<JobSeekerTransactions />} />
       <Route path="/dashboard/job-seeker/pulse" element={<JobSeekerPulseScore />} />
       <Route path="/dashboard/job-seeker/gig-history" element={<JobSeekerGigHistory />} />

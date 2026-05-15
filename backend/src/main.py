@@ -106,10 +106,14 @@ def create_app() -> FastAPI:
     # Add middleware
     add_middleware(app)
 
+    def _request_id(request: Request) -> str:
+        import uuid as _uuid
+        rid = getattr(request.state, "request_id", None)
+        return rid or str(_uuid.uuid4())
+
     # ZovuAPIError → envelope format
     @app.exception_handler(ZovuAPIError)
     async def zovu_api_error_handler(request: Request, exc: ZovuAPIError) -> JSONResponse:
-        import uuid as _uuid
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -119,14 +123,13 @@ def create_app() -> FastAPI:
                     "message": exc.detail,
                     "field": exc.error_field,
                 },
-                "request_id": str(_uuid.uuid4()),
+                "request_id": _request_id(request),
             },
         )
 
     # Pydantic validation errors → envelope format
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-        import uuid as _uuid
         errors = exc.errors()
         first = errors[0] if errors else {}
         field = ".".join(str(l) for l in first.get("loc", [])[1:]) or None
@@ -139,17 +142,18 @@ def create_app() -> FastAPI:
                     "message": first.get("msg", "Validation error"),
                     "field": field,
                 },
-                "request_id": str(_uuid.uuid4()),
+                "request_id": _request_id(request),
             },
         )
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-        import uuid as _uuid
+        request_id = _request_id(request)
         logger.error(
             "unhandled_exception",
             error=str(exc),
             path=str(request.url),
+            request_id=request_id,
             exc_info=True,
         )
         return JSONResponse(
@@ -161,7 +165,7 @@ def create_app() -> FastAPI:
                     "message": "An unexpected error occurred. Please try again.",
                     "field": None,
                 },
-                "request_id": str(_uuid.uuid4()),
+                "request_id": request_id,
             },
         )
 

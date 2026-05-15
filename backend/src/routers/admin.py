@@ -17,6 +17,11 @@ from src.services.fraud_service import FraudService
 from src.services.metrics_service import MetricsService
 from src.services.partnership_service import PartnershipService
 from src.core.exceptions import ZovuAPIError
+from src.models import Ajo, AjoMembership, AjoStatus, AjoTransaction
+from sqlalchemy import select, func
+from datetime import datetime
+from pydantic import BaseModel
+from src.config import settings
 
 logger = structlog.get_logger()
 
@@ -530,5 +535,186 @@ async def get_audit_log(
         "has_more": has_more,
         "next_cursor": str(logs[-1].id) if logs else None,
     }
-    
+
     return {"ok": True, "data": data}
+
+
+# ── AJO ADMIN ───────────────────────────────────────────────
+
+
+class AdminCreateAjoRequest(BaseModel):
+    name: str
+    description: str | None = None
+    minimum_deposit: int  # KOBO
+    end_date: datetime
+    max_members: int = 50
+
+
+@router.post("/ajo/groups")
+async def admin_create_ajo(
+    payload: AdminCreateAjoRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Admin-only: create a new Ajo group. Only admins can manage Ajos."""
+    if payload.minimum_deposit <= 0:
+        raise ZovuAPIError(400, "INVALID_AMOUNT", "minimum_deposit must be positive (kobo)")
+    if payload.end_date <= datetime.now(tz=payload.end_date.tzinfo or None):
+        raise ZovuAPIError(400, "INVALID_DATE", "end_date must be in the future")
+
+    merchant = getattr(settings, "AJO_SQUAD_MERCHANT_ACCOUNT", None) or getattr(settings, "SQUAD_MERCHANT_ACCOUNT_NUMBER", None)
+
+    ajo = Ajo(
+        name=payload.name,
+        description=payload.description,
+        organizer_id=admin.id,
+        contribution_amount=payload.minimum_deposit,
+        contribution_frequency="open",
+        max_members=max(2, min(500, payload.max_members)),
+        status=AjoStatus.ACTIVE,
+        payout_schedule=[],
+        end_date=payload.end_date,
+        merchant_squad_account=merchant,
+    )
+    db.add(ajo)
+    await db.commit()
+    await db.refresh(ajo)
+
+    return {"ok": True, "data": {
+        "id": ajo.id,
+        "name": ajo.name,
+        "minimum_deposit": ajo.contribution_amount,
+        "end_date": ajo.end_date.isoformat() if ajo.end_date else None,
+        "merchant_squad_account": ajo.merchant_squad_account,
+    }}
+
+
+@router.get("/ajo/groups")
+async def admin_list_ajo_groups(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    rows = (await db.execute(select(Ajo).order_by(Ajo.created_at.desc()))).scalars().all()
+    out = []
+    for ajo in rows:
+        member_count = (await db.execute(
+            select(func.count(AjoMembership.id)).where(AjoMembership.ajo_id == ajo.id)
+        )).scalar() or 0
+        out.append({
+            "id": ajo.id,
+            "name": ajo.name,
+            "description": ajo.description,
+            "minimum_deposit": int(ajo.contribution_amount or 0),
+            "end_date": ajo.end_date.isoformat() if ajo.end_date else None,
+            "total_balance": int(ajo.total_balance or 0),
+            "member_count": member_count,
+            "max_members": ajo.max_members,
+            "status": ajo.status,
+            "merchant_squad_account": ajo.merchant_squad_account,
+            "created_at": ajo.created_at.isoformat() if ajo.created_at else None,
+        })
+    return {"ok": True, "data": out}
+
+
+@router.get("/squad/health")
+async def admin_squad_health(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache_dep),
+) -> dict:
+    """
+    Confirm the Squad sandbox/live keys are wired up correctly.
+
+    Runs three cheap reachability checks:
+      1. config values are populated
+      2. an HTTPS GET to SQUAD_BASE_URL returns *something* (network OK)
+      3. a /payout/account/lookup against a known-good GTBank test account
+         exercises the authenticated POST path with no money movement.
+
+    Use this from .ps1 before assuming a 502 on /ajo/contribute is a Squad
+    outage — usually it's a missing or rotated key.
+    """
+    import httpx
+    from src.services.squad import SquadService
+
+    result: dict = {
+        "base_url": settings.SQUAD_BASE_URL,
+        "secret_key_set": bool(settings.SQUAD_SECRET_KEY),
+        "public_key_set": bool(settings.SQUAD_PUBLIC_KEY),
+        "merchant_account_set": bool(settings.AJO_SQUAD_MERCHANT_ACCOUNT),
+        "merchant_account": settings.AJO_SQUAD_MERCHANT_ACCOUNT or None,
+        "reachable": False,
+        "lookup_ok": False,
+        "lookup_error": None,
+    }
+
+    if not (result["secret_key_set"] and result["public_key_set"]):
+        return {"ok": True, "data": result, "warning": "Squad keys are missing in .env"}
+
+    # 1. Cheap reachability check
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            ping = await http.get(settings.SQUAD_BASE_URL)
+            result["reachable"] = True
+            result["ping_status"] = ping.status_code
+    except Exception as exc:
+        result["reachable"] = False
+        result["ping_error"] = str(exc)
+        return {"ok": True, "data": result, "warning": "Squad base URL is not reachable"}
+
+    # 2. Authenticated NIBSS lookup against a known-good GTBank test account.
+    #    Squad's /payout/account/lookup takes the 6-character NIBSS NIP code
+    #    ("000013" = GTBank), not the 3-character CBN sort code. In sandbox,
+    #    Squad commonly returns 424 "Unable to look up name" because NIBSS
+    #    lookups aren't fully mocked — that still proves auth/routing work.
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as http:
+            squad = SquadService(http=http, db=db, redis=redis)
+            lookup = await squad.lookup_account("0123456789", "000013")
+        result["lookup_ok"] = True
+        result["lookup_account_name"] = lookup.get("account_name")
+        result["lookup_bank_code"] = "000013 (GTBank NIP)"
+    except Exception as exc:
+        msg = str(exc)
+        result["lookup_error"] = msg
+        if "424" in msg or "Unable to look up name" in msg:
+            # Auth + payload format are correct, sandbox just can't resolve
+            # the test pair. Treat as healthy.
+            result["lookup_ok"] = True
+            result["lookup_note"] = (
+                "Squad accepted the request but cannot resolve the sandbox test "
+                "pair (NIBSS lookup is not fully mocked). Auth and request "
+                "format are OK — production lookups will work."
+            )
+        else:
+            result["lookup_ok"] = False
+
+    return {"ok": True, "data": result}
+
+
+@router.get("/ajo/transactions")
+async def admin_list_ajo_transactions(
+    limit: int = Query(100, ge=1, le=500),
+    ajo_id: str | None = Query(None),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    q = select(AjoTransaction, Ajo, User).join(Ajo, Ajo.id == AjoTransaction.ajo_id).join(User, User.id == AjoTransaction.user_id)
+    if ajo_id:
+        q = q.where(AjoTransaction.ajo_id == ajo_id)
+    q = q.order_by(AjoTransaction.created_at.desc()).limit(limit)
+    rows = (await db.execute(q)).all()
+    return {"ok": True, "data": [
+        {
+            "id": tx.id,
+            "ajo_id": tx.ajo_id,
+            "ajo_name": ajo.name,
+            "user_id": tx.user_id,
+            "user_email": user.email,
+            "amount": tx.amount,
+            "type": tx.type,
+            "status": tx.status,
+            "timestamp": tx.created_at.isoformat() if tx.created_at else None,
+        }
+        for tx, ajo, user in rows
+    ]}

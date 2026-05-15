@@ -62,6 +62,48 @@ def _validate_csv_paths() -> None:
         )
 
 
+# Columns each CSV must have. Extra columns are OK; missing ones abort the seed
+# (with a clear log line) so we never silently corrupt the DB from a renamed export.
+_REQUIRED_COLUMNS: dict[str, set[str]] = {
+    TRADERS_CSV: {
+        "trader_id", "email", "first_name", "last_name", "business_name",
+    },
+    SEEKERS_CSV: {
+        "seeker_id", "email", "first_name", "last_name",
+    },
+    JOBS_CSV: {
+        "trader_id", "seeker_id", "skill_required", "amount_paid",
+    },
+    TRANSACTIONS_CSV: {
+        "user_id", "amount_gross", "category", "status",
+    },
+}
+
+
+def _validate_csv_schema() -> None:
+    """Validate every required CSV has the columns the seeder reads.
+
+    Raises a ValueError listing every missing column across every file so the
+    fix is obvious instead of a cascade of KeyErrors halfway through the load.
+    """
+    issues: list[str] = []
+    for path, required in _REQUIRED_COLUMNS.items():
+        try:
+            header_df = pd.read_csv(path, nrows=0)
+        except Exception as exc:
+            issues.append(f"{os.path.basename(path)}: failed to read header ({exc})")
+            continue
+        cols = {c.strip() for c in header_df.columns}
+        missing_cols = required - cols
+        if missing_cols:
+            issues.append(
+                f"{os.path.basename(path)}: missing columns {sorted(missing_cols)}; "
+                f"present columns are {sorted(cols)}"
+            )
+    if issues:
+        raise ValueError("CSV schema validation failed:\n  - " + "\n  - ".join(issues))
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _parse_shield(value: str | None) -> ShieldStatus:
@@ -481,6 +523,7 @@ async def run_seeder() -> None:
             return
 
         _validate_csv_paths()
+        _validate_csv_schema()
 
         async with async_session() as session:
             async with session.begin():

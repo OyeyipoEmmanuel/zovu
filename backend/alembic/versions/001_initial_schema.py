@@ -20,15 +20,16 @@ depends_on = None
 def upgrade() -> None:
     """Create all 13 tables."""
     
-    # Create enum types
-    op.execute("CREATE TYPE user_role AS ENUM ('user', 'admin')")
-    op.execute("CREATE TYPE user_status AS ENUM ('ACTIVE', 'SOFT_FROZEN')")
-    op.execute("CREATE TYPE transaction_type AS ENUM ('CREDIT_DEPOSIT', 'CREDIT_WITHDRAWAL', 'LOAN_DISBURSEMENT', 'LOAN_REPAYMENT', 'AJO_CONTRIBUTION', 'AJO_PAYOUT')")
-    op.execute("CREATE TYPE loan_status AS ENUM ('PENDING', 'APPROVED', 'DISBURSED', 'REPAYING', 'COMPLETED', 'DEFAULTED')")
-    op.execute("CREATE TYPE ajo_status AS ENUM ('ACTIVE', 'COMPLETED', 'CLOSED')")
-    op.execute("CREATE TYPE contribution_frequency AS ENUM ('weekly', 'biweekly', 'monthly')")
-    op.execute("CREATE TYPE transaction_status AS ENUM ('PENDING', 'COMPLETED', 'FAILED')")
-    op.execute("CREATE TYPE referral_status AS ENUM ('pending', 'completed', 'expired')")
+    # Get the database dialect
+    dialect_name = op.get_context().dialect.name
+    is_sqlite = dialect_name == 'sqlite'
+    
+    # For SQLite, skip migrations and let SQLAlchemy ORM create tables
+    # The models in src/models/base.py will auto-create tables on startup
+    if is_sqlite:
+        return
+    
+    # Create enum types (PostgreSQL only)
     
     # 1. User table
     op.create_table(
@@ -278,20 +279,13 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop all tables and enum types."""
     
-    # Drop tables (in reverse order of creation)
-    op.drop_table('squad_webhook_log')
-    op.drop_table('pulse_score')
-    op.drop_table('referral')
-    op.drop_table('ajo_membership')
-    op.drop_table('ajo')
-    op.drop_table('job')
-    op.drop_table('transaction')
-    op.drop_table('loan')
-    op.drop_table('credit')
-    op.drop_table('refresh_token')
-    op.drop_table('otp')
-    op.drop_table('device')
-    op.drop_table('user')
+    # Get the database dialect
+    dialect_name = op.get_context().dialect.name
+    is_sqlite = dialect_name == 'sqlite'
+    
+    # For SQLite, no-op (tables will be dropped when DB is deleted)
+    if is_sqlite:
+        return
     
     # Drop enum types
     op.execute("DROP TYPE IF EXISTS referral_status")

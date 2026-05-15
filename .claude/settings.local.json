@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('src/services/squad.py'\\).read\\(\\)\\); ast.parse\\(open\\('src/services/auth.py'\\).read\\(\\)\\); ast.parse\\(open\\('src/routers/auth.py'\\).read\\(\\)\\); ast.parse\\(open\\('src/routers/webhooks.py'\\).read\\(\\)\\); ast.parse\\(open\\('src/workers/squad_tasks.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in ['src/services/squad.py','src/services/auth.py','src/routers/auth.py','src/routers/webhooks.py','src/workers/squad_tasks.py','src/models/base.py','alembic/versions/006_drop_legacy_squad_va_field.py']]; print\\('OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import ast, pathlib; files = ['src/routers/job_seekers.py', 'src/routers/lenders.py', 'src/routers/credit.py', 'src/routers/admin.py', 'src/routers/ajo.py', 'src/services/complaint_service.py', 'src/services/auth.py', 'src/models/base.py', 'src/models/__init__.py', 'src/main.py', 'src/core/middleware.py', 'src/core/seeder.py', 'src/dependencies.py', 'src/config.py']; [ast.parse\\(pathlib.Path\\(f\\).read_text\\(encoding='utf-8'\\)\\) for f in files]; print\\('all files parsed OK'\\)\")",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit -p tsconfig.app.json)",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit -p tsconfig.app.json --ignoreDeprecations 6.0)",
+      "Bash(curl -s http://localhost:4000/health)",
+      "Bash(curl -s -X POST http://localhost:4000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@zovu.co\",\"password\":\"ZovuAdmin2026!\"}')",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['data']['access_token']\\)\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s -H \"Authorization: Bearer $\\(cat /tmp/tok.txt\\)\" http://localhost:4000/api/v1/ajo/groups)",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/payout/account/lookup -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"bank_code\":\"000013\",\"account_number\":\"0123456789\"}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/payout/account/lookup -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"bank_code\":\"000013\",\"account_number\":\"1111111111\"}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/payout/account/lookup -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"bank_code\":\"000013\",\"nip_code\":\"000013\",\"account_number\":\"0123456789\"}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/payout/account/lookup -H 'Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c' -H 'Content-Type: application/json' -d '{\"bank_code\":\"000013\",\"account_number\":\"__TRACKED_VAR__\"}')",
+      "Bash(python -c \"from src.services.squad import SquadService, to_nip_code, CBN_TO_NIP_CODE; print\\('OK', to_nip_code\\('058'\\), to_nip_code\\('000013'\\), to_nip_code\\(''\\)\\)\")",
+      "Bash(curl -sv -X POST https://sandbox-api-d.squadco.com/payout/account/lookup -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"bank_code\":\"000013\",\"account_number\":\"0123456789\"}')",
+      "Bash(tasklist)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ok:', d.get\\('ok'\\), 'count:', len\\(d.get\\('data',[]\\)\\)\\)\")",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/virtual-account -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"customer_identifier\":\"test_user_1\",\"first_name\":\"Test\",\"last_name\":\"User\",\"mobile_num\":\"08012345678\",\"email\":\"test@example.com\",\"bvn\":\"12345678901\",\"is_permanent\":true}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/virtual-account -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"customer_identifier\":\"test_user_1\",\"first_name\":\"Test\",\"last_name\":\"User\",\"mobile_num\":\"08012345678\",\"email\":\"test@example.com\",\"bvn\":\"22222222226\",\"is_permanent\":true,\"dob\":\"1990-01-01\",\"gender\":\"1\",\"address\":\"Lagos\",\"middle_name\":\"Mid\",\"beneficiary_account\":\"\"}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/virtual-account -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"customer_identifier\":\"test_user_xyz123\",\"first_name\":\"Test\",\"last_name\":\"User\",\"mobile_num\":\"08012345678\",\"email\":\"test@example.com\",\"bvn\":\"22222222226\",\"is_permanent\":true,\"dob\":\"1990-01-01\",\"gender\":\"1\",\"address\":\"Lagos\",\"middle_name\":\"Mid\"}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/virtual-account -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"customer_identifier\":\"test_user_xyz123\",\"first_name\":\"Test\",\"last_name\":\"User\",\"mobile_num\":\"08012345678\",\"email\":\"test@example.com\",\"bvn\":\"22222222226\",\"dob\":\"1990-01-01\",\"gender\":\"1\",\"address\":\"Lagos\",\"middle_name\":\"Mid\"}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/virtual-account -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"customer_identifier\":\"test_user_xyz123\",\"first_name\":\"Test\",\"last_name\":\"User\",\"mobile_num\":\"08012345678\",\"email\":\"test@example.com\",\"bvn\":\"22222222226\",\"dob\":\"01/01/1990\",\"gender\":\"1\",\"address\":\"Lagos\",\"middle_name\":\"Mid\"}')",
+      "Bash(curl -s -X POST https://sandbox-api-d.squadco.com/virtual-account -H \"Authorization: Bearer sandbox_sk_9dfe2117ba4b1541abf1d22fa513f11c399e164ba79c\" -H \"Content-Type: application/json\" -d '{\"customer_identifier\":\"test_user_xyz123\",\"first_name\":\"Test\",\"last_name\":\"User\",\"mobile_num\":\"08012345678\",\"email\":\"test@example.com\",\"bvn\":\"22222222226\",\"dob\":\"01/01/1990\",\"gender\":\"1\",\"address\":\"Lagos\",\"middle_name\":\"Mid\",\"beneficiary_account\":\"SB558VQ8X8\"}')",
+      "Bash(python -c \"import sys,json; r=json.load\\(sys.stdin\\); print\\('ok:', r.get\\('ok'\\), 'role:', r.get\\('data',{}\\).get\\('user',{}\\).get\\('role'\\)\\)\")",
+      "Bash(curl -s -X POST http://localhost:4000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"techinfoorg327@gmail.com\",\"password\":\"ZovuAdmin2026!\"}')"
+    ]
+  }
+}

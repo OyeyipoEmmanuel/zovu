@@ -231,6 +231,7 @@ async def submit_kyc(
     req: UserKYCSchema,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_blacklist_dep),
 ):
     try:
         from src.core.security import encrypt_pii
@@ -245,6 +246,8 @@ async def submit_kyc(
         user.phone = phone_encrypted
         user.bvn = bvn_encrypted
         user.nin = nin_encrypted
+        # middle_name, gender, address aren't persisted on User yet (no migration);
+        # we keep them in-request so the inline Squad call has them.
 
         # The user has supplied every required field — their profile IS complete.
         # `profile_complete` gates the dashboard banner and the KYC modal; without
@@ -270,6 +273,54 @@ async def submit_kyc(
             # request, because the data is already saved.
             logger.warning("kyc_celery_dispatch_failed", user_id=user.id, error=str(exc))
 
+        # Provision Squad VA now that we have a real BVN + phone. Try inline
+        # first so the response can include the account number; fall back to
+        # Celery on any failure so the KYC submit itself never errors out.
+        squad_payload: dict = {
+            "squad_provisioned": False,
+            "account_number": None,
+            "bank": None,
+        }
+        if req.bvn:
+            try:
+                import httpx
+                from src.services.squad import SquadService
+                async with httpx.AsyncClient(timeout=30.0) as http:
+                    squad = SquadService(http=http, db=db, redis=redis)
+                    va = await squad.create_virtual_account(
+                        user,
+                        bvn=req.bvn,
+                        phone=req.phone,
+                        first_name=req.first_name,
+                        last_name=req.last_name,
+                        middle_name=req.middle_name,
+                        dob=req.date_of_birth.strftime("%m/%d/%Y"),
+                        gender=req.gender,
+                        address=req.address,
+                    )
+                squad_payload = {
+                    "squad_provisioned": True,
+                    "account_number": va.get("account_number"),
+                    "bank": va.get("bank"),
+                }
+            except Exception as exc:
+                logger.error(
+                    "squad_provisioning_failed_at_kyc",
+                    user_id=user.id,
+                    error=str(exc),
+                )
+                user.squad_provisioned = False
+                await db.commit()
+                try:
+                    from src.workers.squad_tasks import retry_squad_provisioning
+                    retry_squad_provisioning.apply_async(
+                        args=[user.id],
+                        queue="critical",
+                        countdown=10,
+                    )
+                except Exception as celery_exc:
+                    logger.error("squad_retry_dispatch_failed", user_id=user.id, error=str(celery_exc))
+
         logger.info("kyc_submission_received", user_id=user.id)
 
         return _ok({
@@ -277,7 +328,10 @@ async def submit_kyc(
             "message": "KYC documents submitted. Verification in progress.",
             "kyc_verified": bool(user.kyc_verified),
             "profile_complete": bool(user.profile_complete),
+            **squad_payload,
         })
+    except ZovuAPIError:
+        raise
     except Exception as exc:
         logger.error("kyc_submission_failed", user_id=user.id, error=str(exc))
         raise ZovuAPIError(

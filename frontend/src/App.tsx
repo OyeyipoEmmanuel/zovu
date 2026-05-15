@@ -19,6 +19,7 @@ import {
   Step2Business,
   Step3Success,
 } from './features/trader';
+import { AjoTab } from './features/shared/AjoTab';
 
 const DashboardRouter = () => {
   const { user } = useAuthStore();
@@ -50,6 +51,7 @@ function App() {
         {/* Trader Dashboard */}
         <Route path="/dashboard/trader" element={<TraderLayout />}>
           <Route index element={<DashboardHome />} />
+          <Route path="ajo" element={<AjoTab />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="pulse" element={<PulseScore />} />
           <Route path="gig/post" element={<PostGig />} />

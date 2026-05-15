@@ -18,6 +18,9 @@ depends_on = None
 
 def upgrade() -> None:
     """Create admin dashboard tables."""
+    # Skip for SQLite - tables created by ORM on first startup
+    if op.get_context().dialect.name == 'sqlite':
+        return
     
     # Add deleted_at column to users table (for account deletion tracking)
     op.add_column(

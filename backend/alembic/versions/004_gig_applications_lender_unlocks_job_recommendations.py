@@ -1,19 +1,23 @@
 """Add gig_applications, lender_unlocks, job_recommendations tables and Gig.payment_period
 
-Revision ID: 004_new_tables
+Revision ID: 004_gig_applications_lender_unlocks_job_recommendations
 Revises: 003_signup_overhaul
 Create Date: 2025-01-01 00:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "004_new_tables"
-down_revision = "003"
+revision = "004_gig_applications_lender_unlocks_job_recommendations"
+down_revision = "003_signup_overhaul"
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    # Skip for SQLite - tables created by ORM on first startup
+    if op.get_context().dialect.name == 'sqlite':
+        return
+    
     # ── Add payment_period to gigs ────────────────────────────────────────────
     op.add_column("gigs", sa.Column("payment_period", sa.String(50), nullable=True))
 

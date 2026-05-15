@@ -1,41 +1,108 @@
-import {
-  mockUser,
-  mockVirtualAccount,
-  mockTransactions,
-  mockPulseScore,
-  mockPulseSignals,
-  mockPulseHistory,
-  mockGigs,
-  mockRecentPayments,
-  mockLenderStats,
-  mockBorrowers,
-  mockFullBorrower,
-  mockMyLoans,
-  mockPartnerProducts,
-  mockPartnerStats,
-  mockInsuranceServices,
-  mockJobSeekerDashboard,
-  mockRecommendedJobs,
-  mockAllJobs,
-  mockJobSeekerGigHistory,
-  mockJobSeekerTransactions,
-  mockJobSeekerPulseSignals,
-  mockJobSeekerPulseHistory,
-  mockJobSeekerNotifications,
-  mockJobSeekerQR,
-  type Transaction,
-  type PulseSignal,
-  type PulseHistoryPoint,
-  type Gig,
-  type VirtualAccount,
-  type UserProfile,
-  type JobMatch,
-  type GigRecord,
-  type JSTransaction,
-  type JSNotification,
-} from './mockData';
 import type { LenderStats, AnonymisedBorrower, FullBorrowerProfile } from '../types/lender';
-import { api } from '../services/api';
+import { api, refreshAccessToken, API_BASE_URL } from '../services/api';
+import { submitKyc as submitKycRequest } from '../services/authService';
+
+// ─── Types ──────────────────────────────────────────────────
+export interface Transaction {
+  id: string;
+  type: 'inflow' | 'outflow';
+  counterparty: string;
+  amount: number;
+  timestamp: string;
+  reference: string;
+  description: string;
+}
+
+export interface PulseSignal {
+  label: string;
+  value: number;
+}
+
+export interface PulseHistoryPoint {
+  month: string;
+  score: number;
+}
+
+export interface Gig {
+  id: string;
+  title: string;
+  description: string;
+  pay: number;
+  payPeriod: 'Per Hour' | 'Per Day' | 'Fixed';
+  location: string;
+  urgency: 'Normal' | 'Urgent';
+  skills: string[];
+  languages: string[];
+  postedAt: string;
+  status: 'active' | 'closed';
+}
+
+export interface VirtualAccount {
+  accountNumber: string;
+  accountName: string;
+  bankName: string;
+  balance: number;
+}
+
+export interface UserProfile {
+  id?: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: 'trader' | 'job_seeker' | 'partner';
+  businessName: string;
+  profileCompletion: number;
+  avatarUrl: string | null;
+  kycComplete: boolean;
+  squadVaNumber: string | null;
+  squadVaBank: string | null;
+}
+
+export interface JobMatch {
+  id: string;
+  title: string;
+  employer: string;
+  pay: number;
+  pay_period: string;
+  lga: string;
+  match_pct: number;
+  match_reasons: string[];
+  skills_required: string[];
+  posted: string;
+  urgent: boolean;
+  applied: boolean;
+}
+
+export interface GigRecord {
+  id: string;
+  title: string;
+  employer: string;
+  date: string;
+  pay: number;
+  duration: string;
+  status: 'completed' | 'cancelled';
+  rating: number | null;
+  review: string | null;
+}
+
+export interface JSTransaction {
+  id: string;
+  type: 'inflow' | 'outflow';
+  counterparty: string;
+  amount: number;
+  timestamp: string;
+  reference: string;
+  description: string;
+}
+
+export interface JSNotification {
+  id: string;
+  type: 'job' | 'payment' | 'score';
+  title: string;
+  body: string;
+  created_at: string;
+  read: boolean;
+}
 
 export interface MyLoanRecord {
   borrower_name: string;
@@ -72,10 +139,29 @@ export interface PartnerStats {
   customers_served: number;
 }
 
-/** Use mock fixtures only when VITE_USE_MOCK === 'true'. */
-export const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
+export interface AjoGroup {
+  id: string;
+  name: string;
+  description: string | null;
+  minimum_deposit: number;
+  end_date: string | null;
+  total_balance: number;
+  member_count: number;
+  status: string;
+  joined: boolean;
+  total_contributed?: number;
+  estimated_return?: number;
+}
 
-const API_V1 = '/api/v1';
+export interface AjoTransaction {
+  id: string;
+  ajo_id: string;
+  ajo_name: string;
+  amount: number;
+  type: 'contribution' | 'payout';
+  status: string;
+  timestamp: string;
+}
 
 class ApiError extends Error {
   status: number;
@@ -91,32 +177,53 @@ const getAuthHeader = (): Record<string, string> => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-const delay = (ms: number): Promise<void> =>
-  new Promise((r) => setTimeout(r, ms));
+const isRefreshableAuthRoute = (path: string): boolean =>
+  path === '/auth/refresh' ||
+  path === '/auth/login' ||
+  path === '/auth/register' ||
+  path === '/auth/verify-otp' ||
+  path === '/auth/resend-otp';
 
-/** Legacy JSON fetch for non-envelope /api/v1 routes (credit, loans, transactions). */
+const rawFetchOnce = async (
+  path: string,
+  init: RequestInit,
+  auth: boolean,
+): Promise<Response> => {
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+  if (!(init.body instanceof FormData)) {
+    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+  }
+  if (auth) Object.assign(headers, getAuthHeader());
+  return fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include' });
+};
+
+/** Legacy JSON fetch for non-envelope routes (credit, loans, transactions). */
 const rawV1 = async <T>(
   path: string,
   options: RequestInit & { auth?: boolean } = {}
 ): Promise<T> => {
   const { auth = true, ...init } = options;
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string>),
-  };
-  if (!(init.body instanceof FormData)) {
-    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+
+  let res = await rawFetchOnce(path, init, auth);
+
+  if (res.status === 401 && auth && !isRefreshableAuthRoute(path)) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      res = await rawFetchOnce(path, init, auth);
+    }
   }
-  if (auth) Object.assign(headers, getAuthHeader());
-  const res = await fetch(`${API_V1}${path}`, { ...init, headers, credentials: 'include' });
+
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
+    const err = data.error as { message?: string; code?: string } | undefined;
     const detail = data.detail as string | { msg?: string }[] | undefined;
     const msg =
-      typeof detail === 'string'
+      err?.message ??
+      (typeof detail === 'string'
         ? detail
         : Array.isArray(detail)
           ? String(detail[0]?.msg ?? detail)
-          : (data.message as string) ?? 'Request failed';
+          : (data.message as string) ?? 'Request failed');
     throw new ApiError(res.status, msg);
   }
   if (data && data.ok === false) {
@@ -195,9 +302,6 @@ const mapMeToUserProfile = (me: AuthMeResponse): UserProfile => {
   const kycDone = Boolean(me.kyc_verified);
   const profileDone = Boolean(me.profile_complete);
   const completion = profileDone ? 100 : kycDone ? 85 : 60;
-  // /auth/me returns the raw backend role ("lender", "trader", "job_seeker",
-  // "admin"). The frontend UserProfile uses the legacy "partner" alias for
-  // lenders, so translate at this boundary instead of falling through to "trader".
   const rawRole = (me.role || '').toLowerCase();
   const role: UserProfile['role'] =
     rawRole === 'job_seeker' || rawRole === 'seeker'
@@ -275,20 +379,12 @@ const mapJobRow = (row: Record<string, unknown>): JobMatch => ({
 
 // ─── User ──────────────────────────────────────────────────
 export const fetchUserProfile = async (): Promise<UserProfile> => {
-  if (USE_MOCK) {
-    await delay(400);
-    return mockUser;
-  }
   const me = await getAuthMeCached();
   return mapMeToUserProfile(me);
 };
 
 // ─── Virtual Account ───────────────────────────────────────
 export const fetchVirtualAccount = async (): Promise<VirtualAccount> => {
-  if (USE_MOCK) {
-    await delay(300);
-    return mockVirtualAccount;
-  }
   const [me, credit] = await Promise.all([
     getAuthMeCached(),
     rawV1<CreditStatusResponse>('/credit/status', { method: 'GET' }),
@@ -313,14 +409,6 @@ export const fetchTransactions = async (
   limit = 15,
   cursor?: string | null
 ): Promise<{ data: Transaction[]; total: number; cursor?: string | null; has_more?: boolean }> => {
-  if (USE_MOCK) {
-    await delay(import.meta.env.DEV ? 0 : 120);
-    const filtered =
-      filter === 'all'
-        ? mockTransactions
-        : mockTransactions.filter((t) => t.type === filter);
-    return { data: filtered, total: filtered.length };
-  }
   const fetchLimit = filter === 'all' ? limit : Math.min(100, limit * 5);
   const qs = new URLSearchParams({ limit: String(fetchLimit) });
   if (cursor) qs.set('cursor', cursor);
@@ -349,13 +437,10 @@ export const fetchPulseScore = async (): Promise<{
   loanEligibility: number;
   signals: PulseSignal[];
 }> => {
-  if (USE_MOCK) {
-    await delay(import.meta.env.DEV ? 0 : 200);
-    return { ...mockPulseScore, signals: mockPulseSignals };
-  }
-  const [me, credit] = await Promise.all([
+  const [me, credit, signalsRes] = await Promise.all([
     getAuthMeCached(),
     rawV1<CreditStatusResponse>('/credit/status', { method: 'GET' }),
+    v1OkData<{ signals: PulseSignal[] }>('/credit/pulse-signals', { method: 'GET' }).catch(() => ({ signals: [] })),
   ]);
   const score = me.pulse_score ?? 0;
   return {
@@ -363,31 +448,19 @@ export const fetchPulseScore = async (): Promise<{
     maxScore: 850,
     tier: getPulseTier(score),
     loanEligibility: Math.round((credit.max_eligible_loan ?? 0) / 100),
-    signals: [],
+    signals: signalsRes?.signals ?? [],
   };
 };
 
 export const fetchPulseHistory = async (): Promise<PulseHistoryPoint[]> => {
-  if (USE_MOCK) {
-    await delay(300);
-    return mockPulseHistory;
-  }
-  return [];
+  const data = await v1OkData<PulseHistoryPoint[]>('/credit/pulse-history', { method: 'GET' }).catch(() => []);
+  return Array.isArray(data) ? data : [];
 };
 
 // ─── Gigs ──────────────────────────────────────────────────
 export const postGig = async (
   gig: Omit<Gig, 'id' | 'postedAt' | 'status'>
 ): Promise<Gig> => {
-  if (USE_MOCK) {
-    await delay(800);
-    return {
-      ...gig,
-      id: `gig_${Date.now()}`,
-      postedAt: new Date().toISOString(),
-      status: 'active',
-    };
-  }
   const body = {
     title: gig.title,
     description: gig.description,
@@ -404,10 +477,6 @@ export const postGig = async (
 };
 
 export const fetchMyGigs = async (): Promise<Gig[]> => {
-  if (USE_MOCK) {
-    await delay(import.meta.env.DEV ? 0 : 200);
-    return mockGigs;
-  }
   const list = await v1OkData<Record<string, unknown>[]>('/gigs/my-gigs', { method: 'GET' });
   return Array.isArray(list) ? list.map(mapBackendGigToGig) : [];
 };
@@ -416,10 +485,6 @@ export const fetchMyGigs = async (): Promise<Gig[]> => {
 export const fetchRecentPayments = async (): Promise<
   { id: string; sender: string; amount: number; timestamp: string }[]
 > => {
-  if (USE_MOCK) {
-    await delay(300);
-    return mockRecentPayments;
-  }
   const { data } = await fetchTransactions('inflow', 1, 8);
   return data.map((t) => ({
     id: t.id,
@@ -430,16 +495,16 @@ export const fetchRecentPayments = async (): Promise<
 };
 
 // ─── KYC & Profile ───────────────────────────────────────────
+export interface SubmitKYCResult {
+  kyc_complete: boolean;
+  squad_provisioned: boolean;
+  squad_va_number: string;
+  squad_va_bank: string;
+}
+
 export const submitKYC = async (
   data: Record<string, unknown>
-): Promise<{ kyc_complete: boolean; squad_va_number: string; squad_va_bank: string }> => {
-  if (USE_MOCK) {
-    await delay(1500);
-    mockUser.kycComplete = true;
-    mockUser.squadVaNumber = '0123456789';
-    mockUser.squadVaBank = 'GTBank';
-    return { kyc_complete: true, squad_va_number: '0123456789', squad_va_bank: 'GTBank' };
-  }
+): Promise<SubmitKYCResult> => {
   const dobRaw = typeof data.dob === 'string' ? data.dob : '';
   let date_of_birth = dobRaw;
   if (/^\d{4}-\d{2}-\d{2}$/.test(dobRaw)) {
@@ -449,10 +514,6 @@ export const submitKYC = async (
     if (y && m && d) date_of_birth = `${y.padStart(4, '0')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T00:00:00Z`;
   }
 
-  // Derive first/last from whichever field the form provided. Step1KYC sends
-  // first_name + last_name explicitly; older callers send only `full_name`.
-  // Falling back to literal "User"/"Trader" (the previous behaviour) silently
-  // overwrote the real name on every KYC submission.
   const fullName = (data.full_name as string | undefined)?.trim() || '';
   const fullParts = fullName ? fullName.split(/\s+/) : [];
   const first =
@@ -470,43 +531,47 @@ export const submitKYC = async (
     throw new Error('Phone number is required for KYC');
   }
 
-  await api.post<{ status: string; message: string; kyc_verified?: boolean; profile_complete?: boolean }>(
-    '/auth/kyc',
-    {
-      first_name: first,
-      last_name: last,
-      date_of_birth,
-      phone: rawPhone, // services/authService.normalizePhone is applied inside submitKyc
-      bvn: data.bvn as string | undefined,
-      nin: data.nin as string | undefined,
-    },
-    true
-  );
-  // Re-fetch /auth/me so kyc_verified / profile_complete from the backend wins
-  // over any optimistic local state.
+  const kyc = await submitKycRequest({
+    first_name: first,
+    last_name: last,
+    middle_name: (data.middle_name as string | undefined) || undefined,
+    date_of_birth,
+    phone: rawPhone,
+    bvn: (data.bvn as string | undefined) || undefined,
+    nin: (data.nin as string | undefined) || undefined,
+    gender: (data.gender as '1' | '2' | undefined) || undefined,
+    address: (data.address as string | undefined) || undefined,
+  });
+
   invalidateAuthMeCache();
-  const me = await getAuthMeCached().catch(() => null);
+
+  let accountNumber = (kyc.account_number || '').trim();
+  let accountBank = (kyc.bank || '').trim();
+  let kycComplete = Boolean(kyc.kyc_verified);
+  let provisioned = Boolean(kyc.squad_provisioned);
+
+  if (!accountNumber || !accountBank) {
+    const me = await getAuthMeCached().catch(() => null);
+    if (me) {
+      accountNumber = accountNumber || me.squad_account_number || '';
+      accountBank = accountBank || me.squad_account_bank || '';
+      kycComplete = kycComplete || Boolean(me.kyc_verified);
+    }
+  }
+
   return {
-    kyc_complete: Boolean(me?.kyc_verified) || true,
-    squad_va_number: me?.squad_account_number || '',
-    squad_va_bank: me?.squad_account_bank || '',
+    kyc_complete: kycComplete,
+    squad_provisioned: provisioned,
+    squad_va_number: accountNumber,
+    squad_va_bank: accountBank,
   };
 };
 
 export const submitBusinessInfo = async (_data: unknown): Promise<{ success: boolean }> => {
-  if (USE_MOCK) {
-    await delay(1000);
-    mockUser.profileCompletion = 100;
-    return { success: true };
-  }
   return { success: true };
 };
 
 export const fetchKYCStatus = async (): Promise<{ kyc_complete: boolean; squad_va_number: string | null }> => {
-  if (USE_MOCK) {
-    await delay(300);
-    return { kyc_complete: false, squad_va_number: null };
-  }
   const me = await getAuthMeCached();
   return {
     kyc_complete: Boolean(me.kyc_verified),
@@ -520,10 +585,6 @@ export const applyForLoan = async (data: {
   purpose: string;
   repayment_period: string;
 }): Promise<{ success: boolean }> => {
-  if (USE_MOCK) {
-    await delay(2000);
-    return { success: true };
-  }
   const map: Record<string, 7 | 14 | 30 | 60> = {
     '7': 7,
     '14': 14,
@@ -544,74 +605,41 @@ export const applyForLoan = async (data: {
 };
 
 export const fetchMyApplications = async (): Promise<unknown[]> => {
-  if (USE_MOCK) {
-    await delay(500);
-    return [];
-  }
   const res = await rawV1<{ loans: unknown[] }>('/loans');
   return res.loans ?? [];
 };
 
 export const lenderProfileAPI = {
   step1: (payload: {
-    organization_name: string
-    account_type: 'individual' | 'microfinance' | 'cooperative' | 'fintech' | 'insurance'
-    phone: string
-  }) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void payload;
-    return Promise.resolve({ success: true });
-  },
+    organization_name: string;
+    account_type: 'individual' | 'microfinance' | 'cooperative' | 'fintech' | 'insurance';
+    phone: string;
+  }) => api.post<{ success: boolean }>('/lenders/profile/step1', payload, true),
 
   step2Individual: (payload: {
-    bvn: string
-    nin: string
-    dob: string
-    gender: '1' | '2'
-  }) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void payload;
-    return Promise.resolve({ success: true });
-  },
+    bvn: string;
+    nin: string;
+    dob: string;
+    gender: '1' | '2';
+  }) => api.post<{ success: boolean }>('/lenders/profile/step2-individual', payload, true),
 
   step2Organization: (payload: {
-    cac_number: string
-    organization_bvn: string
-    year_established: number
-  }) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void payload;
-    return Promise.resolve({ success: true });
-  },
+    cac_number: string;
+    organization_bvn: string;
+    year_established: number;
+  }) => api.post<{ success: boolean }>('/lenders/profile/step2-organization', payload, true),
 
   step3: (payload: {
-    bank_name: string
-    account_number: string
-    account_name: string
-    min_lending_amount: number
-    max_lending_amount: number
-    preferred_tiers: string[]
-    preferred_lgas: string[]
-  }) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void payload;
-    return Promise.resolve({ success: true });
-  },
+    bank_name: string;
+    account_number: string;
+    account_name: string;
+    min_lending_amount: number;
+    max_lending_amount: number;
+    preferred_tiers: string[];
+    preferred_lgas: string[];
+  }) => api.post<{ success: boolean }>('/lenders/profile/step3', payload, true),
 
-  getStatus: () => {
-    if (USE_MOCK) {
-      return delay(500).then(() => ({ verified: false, current_step: 1 }));
-    }
-    return Promise.resolve({ verified: false, current_step: 1 as const });
-  }
+  getStatus: () => api.get<{ verified: boolean; current_step: number }>('/lenders/profile/status', true),
 };
 
 const normalizeLenderTier = (t: string): AnonymisedBorrower['tier'] => {
@@ -636,10 +664,6 @@ const mapLenderCustomer = (row: Record<string, unknown>): AnonymisedBorrower => 
 // ─── Lender ──────────────────────────────────────────────────
 export const lenderAPI = {
   getStats: async (): Promise<LenderStats> => {
-    if (USE_MOCK) {
-      await delay(500);
-      return mockLenderStats;
-    }
     const d = await v1OkData<{
       total_disbursed?: number;
       active_loans?: number;
@@ -656,25 +680,14 @@ export const lenderAPI = {
   },
 
   getBorrowers: async (filters?: {
-    minScore?: number
-    tier?: string
-    lga?: string
-    minAmount?: number
-    maxAmount?: number
-    limit?: number
-    page?: number
+    minScore?: number;
+    tier?: string;
+    lga?: string;
+    minAmount?: number;
+    maxAmount?: number;
+    limit?: number;
+    page?: number;
   }): Promise<AnonymisedBorrower[]> => {
-    if (USE_MOCK) {
-      await delay(500);
-      let res = [...mockBorrowers];
-      if (filters?.minScore) res = res.filter(b => b.pulse_score >= filters.minScore!);
-      if (filters?.tier && filters.tier !== 'All') res = res.filter(b => b.tier === filters.tier);
-      if (filters?.lga) res = res.filter(b => b.lga === filters.lga);
-      if (filters?.minAmount) res = res.filter(b => b.loan_amount_requested >= filters.minAmount!);
-      if (filters?.maxAmount) res = res.filter(b => b.loan_amount_requested <= filters.maxAmount!);
-      if (filters?.limit) res = res.slice(0, filters.limit);
-      return res as AnonymisedBorrower[];
-    }
     const params = new URLSearchParams();
     if (filters?.minScore != null) params.set('min_score', String(filters.minScore));
     if (filters?.tier && filters.tier !== 'All') params.set('tier', filters.tier);
@@ -692,16 +705,12 @@ export const lenderAPI = {
   },
 
   getBorrowerById: async (id: string): Promise<FullBorrowerProfile> => {
-    if (USE_MOCK) {
-      await delay(500);
-      return mockFullBorrower as FullBorrowerProfile;
-    }
     const row = await v1OkData<Record<string, unknown>>(`/lenders/customers/${id}`, { method: 'GET' });
     const base = mapLenderCustomer(row);
     return {
       ...base,
       full_name: String(row.display_name ?? base.display_name),
-      signals: {
+      signals: (row.signals as FullBorrowerProfile['signals']) || {
         transaction_frequency: 0,
         transaction_growth: 0,
         gig_completion_rate: 0,
@@ -709,7 +718,7 @@ export const lenderAPI = {
         network_density: 0,
         financial_discipline: 0,
       },
-      transaction_summary: {
+      transaction_summary: (row.transaction_summary as FullBorrowerProfile['transaction_summary']) || {
         avg_monthly_volume: 0,
         transaction_days_per_month: 0,
         longest_streak: 0,
@@ -718,28 +727,23 @@ export const lenderAPI = {
   },
 
   disburse: async (payload: {
-    borrower_id: string
-    amount: number
-    repayment_days: number
+    borrower_id: string;
+    amount: number;
+    repayment_days: number;
   }): Promise<{ success: boolean }> => {
-    if (USE_MOCK) {
-      await delay(1500);
-      return { success: true };
-    }
-    void payload;
-    return { success: false };
+    await v1OkData<{ success: boolean }>('/lenders/disburse', {
+      method: 'POST',
+      body: JSON.stringify({
+        borrower_id: payload.borrower_id,
+        amount: Math.round(payload.amount * 100),
+        repayment_days: payload.repayment_days,
+      }),
+    });
+    return { success: true };
   },
 
   getMyLoans: async (status?: 'active' | 'repaid' | 'overdue'): Promise<MyLoanRecord[]> => {
-    if (USE_MOCK) {
-      await delay(600);
-      let loans = [...mockMyLoans] as MyLoanRecord[];
-      if (status && status !== 'all' as any) {
-        loans = loans.filter(l => l.status === status);
-      }
-      return loans;
-    }
-    const params = status && status !== 'all' as any ? `?status=${status}` : '';
+    const params = status && status !== ('all' as any) ? `?status=${status}` : '';
     const rows = await v1OkData<Record<string, unknown>[]>(`/lenders/loans${params}`, { method: 'GET' });
     const mapStatus = (s: string): MyLoanRecord['status'] => {
       const x = (s || '').toLowerCase();
@@ -761,14 +765,6 @@ export const lenderAPI = {
   },
 
   getLoanStats: async (): Promise<MyLoanStats> => {
-    if (USE_MOCK) {
-      await delay(400);
-      return {
-        total_disbursed: 4200000,
-        active_loans: 12,
-        recovered: 1850000,
-      };
-    }
     const d = await v1OkData<{
       total_disbursed?: number;
       active_loans?: number;
@@ -780,207 +776,171 @@ export const lenderAPI = {
       recovered: Math.round((d.recovered ?? 0) / 100),
     };
   },
+
+  // Service offering APIs
+  offerService: async (payload: {
+    name: string;
+    type: 'loan' | 'insurance' | 'savings';
+    description: string;
+    min_pulse_score: number;
+    max_amount?: number;
+    interest_rate?: number;
+    premium_amount?: number;
+    repayment_days?: number;
+  }) => v1OkData<{ id: string }>('/lenders/services/offer', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      max_amount: payload.max_amount ? Math.round(payload.max_amount * 100) : undefined,
+      premium_amount: payload.premium_amount ? Math.round(payload.premium_amount * 100) : undefined,
+    }),
+  }),
+
+  getMyServices: async (type?: 'loan' | 'insurance' | 'savings' | 'overdue') => {
+    const q = type ? `?type=${type}` : '';
+    return v1OkData<any[]>(`/lenders/services${q}`, { method: 'GET' });
+  },
+
+  getServiceById: async (id: string) =>
+    v1OkData<any>(`/lenders/services/${id}`, { method: 'GET' }),
+
+  updateService: async (id: string, payload: Record<string, unknown>) =>
+    v1OkData<any>(`/lenders/services/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
 };
 
-// ─── Partner (no v1 API yet — live builds return empty / noop) ─────
+// ─── Partner ──────────────────────────────────────────────────
 export const partnerAPI = {
-  getMyProducts: async () => {
-    if (USE_MOCK) {
-      await delay(500);
-      return mockPartnerProducts;
-    }
-    return [];
-  },
+  getMyProducts: async () => v1OkData<any[]>('/lenders/services', { method: 'GET' }),
 
   addProduct: async (payload: {
-    name: string
-    type: 'loan' | 'insurance' | 'savings'
-    description: string
-    min_pulse_score: number
-    max_amount?: number
-    interest_rate?: number
-    premium_amount?: number
-    repayment_days?: number
-  }) => {
-    if (USE_MOCK) {
-      await delay(1000);
-      return { success: true };
-    }
-    void payload;
-    return { success: false };
-  },
+    name: string;
+    type: 'loan' | 'insurance' | 'savings';
+    description: string;
+    min_pulse_score: number;
+    max_amount?: number;
+    interest_rate?: number;
+    premium_amount?: number;
+    repayment_days?: number;
+  }) => lenderAPI.offerService(payload),
 
-  enroll: async (payload: {
-    customer_id: string
-    product_id: string
-  }) => {
-    if (USE_MOCK) {
-      await delay(1500);
-      return { success: true };
-    }
-    void payload;
-    return { success: false };
-  },
+  enroll: async (payload: { customer_id: string; product_id: string }) =>
+    v1OkData<{ success: boolean }>(`/lenders/services/${payload.product_id}/enroll`, {
+      method: 'POST',
+      body: JSON.stringify({ customer_id: payload.customer_id }),
+    }),
 
   getStats: async (): Promise<PartnerStats> => {
-    if (USE_MOCK) {
-      await delay(500);
-      return mockPartnerStats;
-    }
-    return { total_disbursed: 0, active_services: 0, customers_served: 0 };
+    const d = await v1OkData<{
+      total_disbursed?: number;
+      active_services?: number;
+      customers_served?: number;
+    }>('/lenders/stats', { method: 'GET' });
+    return {
+      total_disbursed: Math.round((d.total_disbursed ?? 0) / 100),
+      active_services: d.active_services ?? 0,
+      customers_served: d.customers_served ?? 0,
+    };
   },
 
   getCustomers: async (filters?: {
-    minScore?: number
-    tier?: string
-    lga?: string
-    minAmount?: number
-    maxAmount?: number
-    productType?: 'loan' | 'insurance' | 'savings'
-    limit?: number
-    page?: number
+    minScore?: number;
+    tier?: string;
+    lga?: string;
+    minAmount?: number;
+    maxAmount?: number;
+    productType?: 'loan' | 'insurance' | 'savings';
+    limit?: number;
+    page?: number;
   }) => {
-    if (USE_MOCK) {
-      await delay(500);
-      let res = [...mockBorrowers];
-      if (filters?.minScore) res = res.filter(b => b.pulse_score >= filters.minScore!);
-      if (filters?.tier && filters.tier !== 'All') res = res.filter(b => b.tier === filters.tier);
-      if (filters?.lga) res = res.filter(b => b.lga === filters.lga);
-      if (filters?.minAmount) res = res.filter(b => b.loan_amount_requested >= filters.minAmount!);
-      if (filters?.maxAmount) res = res.filter(b => b.loan_amount_requested <= filters.maxAmount!);
-      if (filters?.limit) res = res.slice(0, filters.limit);
-      return res;
-    }
-    return [];
+    const params = new URLSearchParams();
+    if (filters?.minScore != null) params.set('min_score', String(filters.minScore));
+    if (filters?.tier && filters.tier !== 'All') params.set('tier', filters.tier);
+    if (filters?.lga) params.set('lga', filters.lga);
+    if (filters?.limit != null) params.set('limit', String(filters.limit));
+    const q = params.toString();
+    const rows = await v1OkData<Record<string, unknown>[]>(
+      `/lenders/customers${q ? `?${q}` : ''}`,
+      { method: 'GET' }
+    );
+    return Array.isArray(rows) ? rows.map(mapLenderCustomer) : [];
   },
 
-  getCustomerById: async (id: string) => {
-    if (USE_MOCK) {
-      await delay(500);
-      return mockFullBorrower;
-    }
-    void id;
-    return null;
-  },
+  getCustomerById: async (id: string) =>
+    v1OkData<any>(`/lenders/customers/${id}`, { method: 'GET' }),
 
   disburse: async (payload: {
-    customer_id: string
-    amount: number
-    repayment_days: number
-  }) => {
-    if (USE_MOCK) {
-      await delay(1500);
-      return { success: true };
-    }
-    void payload;
-    return { success: false };
-  },
+    customer_id: string;
+    amount: number;
+    repayment_days: number;
+  }) => lenderAPI.disburse({
+    borrower_id: payload.customer_id,
+    amount: payload.amount,
+    repayment_days: payload.repayment_days,
+  }),
 
-  getMyServices: async (type?: 'loan' | 'insurance' | 'savings' | 'overdue') => {
-    if (USE_MOCK) {
-      await delay(600);
-      const loanServices = (mockMyLoans as any[]).map(l => ({ ...l, type: 'loan' }));
-      const insuranceServices = (mockInsuranceServices as any[]);
-      let all = [...loanServices, ...insuranceServices];
-      if (type === 'loan') all = all.filter(s => s.type === 'loan');
-      else if (type === 'insurance') all = all.filter(s => s.type === 'insurance');
-      else if (type === 'savings') all = all.filter(s => s.type === 'savings');
-      else if (type === 'overdue') all = all.filter(s => s.status === 'overdue');
-      return all;
-    }
-    return [];
-  },
+  getMyServices: async (type?: 'loan' | 'insurance' | 'savings' | 'overdue') =>
+    lenderAPI.getMyServices(type),
 };
 
 export const jobSeekerOnboardingAPI = {
-  skills: (payload: {
-    skills: string[]
-    languages: string[]
-    primary_language: string
-  }) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void payload;
-    return Promise.resolve({ success: true });
-  },
+  skills: (payload: { skills: string[]; languages: string[]; primary_language: string }) =>
+    api.post<{ success: boolean }>('/job-seekers/onboarding/skills', payload, true),
 
   experience: (payload: {
-    years_of_experience: string
-    education_level: string
-    currently_employed: boolean
-    current_job_title?: string
-    current_employer?: string
+    years_of_experience: string;
+    education_level: string;
+    currently_employed: boolean;
+    current_job_title?: string;
+    current_employer?: string;
     work_history: {
-      job_title: string
-      employer?: string
-      type: 'full_time' | 'part_time' | 'gig' | 'apprenticeship'
-      duration: string
-    }[]
-  }) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void payload;
-    return Promise.resolve({ success: true });
-  },
+      job_title: string;
+      employer?: string;
+      type: 'full_time' | 'part_time' | 'gig' | 'apprenticeship';
+      duration: string;
+    }[];
+  }) =>
+    api.post<{ success: boolean }>('/job-seekers/onboarding/experience', payload, true),
 
-  cv: (formData: FormData) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void formData;
-    return Promise.resolve({ success: true });
-  },
+  cv: (formData: FormData) =>
+    rawV1<{ success: boolean }>('/job-seekers/onboarding/cv', { method: 'POST', body: formData }),
 
   preferences: (payload: {
-    availability: 'full_time' | 'part_time' | 'gig' | 'open'
-    preferred_lgas: string[]
-    willing_to_relocate: boolean
-    min_pay: number
-    pay_period: 'hour' | 'day' | 'week' | 'month' | 'gig'
-    auto_save_pct: number
-    emergency_contact_name: string
-    emergency_contact_phone: string
-  }) => {
-    if (USE_MOCK) {
-      return delay(1000).then(() => ({ success: true }));
-    }
-    void payload;
-    return Promise.resolve({ success: true });
-  },
+    availability: 'full_time' | 'part_time' | 'gig' | 'open';
+    preferred_lgas: string[];
+    willing_to_relocate: boolean;
+    min_pay: number;
+    pay_period: 'hour' | 'day' | 'week' | 'month' | 'gig';
+    auto_save_pct: number;
+    emergency_contact_name: string;
+    emergency_contact_phone: string;
+  }) =>
+    api.post<{ success: boolean }>('/job-seekers/onboarding/preferences', payload, true),
 
-  getStatus: () => {
-    if (USE_MOCK) {
-      return delay(500).then(() => ({ complete: false, current_step: 'skills' as const }));
-    }
-    return Promise.resolve({ complete: false, current_step: 'skills' as const });
-  }
+  getStatus: () =>
+    api.get<{ complete: boolean; current_step: 'skills' | 'experience' | 'cv' | 'preferences' | 'done' }>(
+      '/job-seekers/onboarding/status',
+      true,
+    ),
 };
 
 // ─── Job Seeker Dashboard ───────────────────────────────────
 export const jobSeekerAPI = {
   getDashboard: async () => {
-    if (USE_MOCK) {
-      await delay(500);
-      return mockJobSeekerDashboard;
-    }
     const d = await v1OkData<Record<string, unknown>>('/job-seekers/dashboard', { method: 'GET' });
     return {
       pulse_score: Number(d.pulse_score ?? 0),
       tier: String(d.tier ?? 'Bronze'),
-      total_earned: 0,
-      gigs_completed: Number(d.applications ?? 0),
-      squad_va_number: '',
-      squad_va_balance: 0,
+      total_earned: Number(d.total_earned ?? 0),
+      gigs_completed: Number(d.gigs_completed ?? d.applications ?? 0),
+      squad_va_number: String(d.squad_va_number ?? ''),
+      squad_va_balance: Number(d.squad_va_balance ?? 0),
     };
   },
 
   getRecommendedJobs: async (): Promise<JobMatch[]> => {
-    if (USE_MOCK) {
-      await delay(500);
-      return mockRecommendedJobs;
-    }
     const rows = await v1OkData<Record<string, unknown>[]>('/job-seekers/recommendations', { method: 'GET' });
     return Array.isArray(rows) ? rows.map(mapJobRow) : [];
   },
@@ -991,18 +951,6 @@ export const jobSeekerAPI = {
     min_pay?: number;
     urgent?: boolean;
   }): Promise<JobMatch[]> => {
-    if (USE_MOCK) {
-      await delay(500);
-      let jobs = [...mockAllJobs];
-      if (filters?.search) {
-        const q = filters.search.toLowerCase();
-        jobs = jobs.filter(j => j.title.toLowerCase().includes(q) || j.skills_required.some(s => s.toLowerCase().includes(q)));
-      }
-      if (filters?.lga) jobs = jobs.filter(j => j.lga === filters.lga);
-      if (filters?.min_pay) jobs = jobs.filter(j => j.pay >= filters.min_pay!);
-      if (filters?.urgent) jobs = jobs.filter(j => j.urgent);
-      return jobs;
-    }
     const params = new URLSearchParams();
     if (filters?.search) params.set('search', filters.search);
     if (filters?.lga) params.set('lga', filters.lga);
@@ -1017,20 +965,11 @@ export const jobSeekerAPI = {
   },
 
   applyForJob: async (jobId: string): Promise<{ success: boolean }> => {
-    if (USE_MOCK) {
-      await delay(800);
-      return { success: true };
-    }
     await v1OkData<unknown>(`/gigs/${jobId}/apply`, { method: 'POST', body: '{}' });
     return { success: true };
   },
 
   getTransactions: async (filter?: 'all' | 'inflow' | 'outflow'): Promise<JSTransaction[]> => {
-    if (USE_MOCK) {
-      await delay(500);
-      if (!filter || filter === 'all') return mockJobSeekerTransactions;
-      return mockJobSeekerTransactions.filter(t => t.type === filter);
-    }
     const { data } = await fetchTransactions(filter || 'all', 1, 40);
     return data.map((t) => ({
       id: t.id,
@@ -1044,79 +983,132 @@ export const jobSeekerAPI = {
   },
 
   getPulseScore: async () => {
-    if (USE_MOCK) {
-      await delay(400);
-      return {
-        score: mockJobSeekerDashboard.pulse_score,
-        tier: mockJobSeekerDashboard.tier,
-        signals: mockJobSeekerPulseSignals,
-      };
-    }
-    const d = await v1OkData<Record<string, unknown>>('/job-seekers/dashboard', { method: 'GET' });
+    const [d, signalsRes] = await Promise.all([
+      v1OkData<Record<string, unknown>>('/job-seekers/dashboard', { method: 'GET' }),
+      v1OkData<{ signals: PulseSignal[] }>('/credit/pulse-signals', { method: 'GET' }).catch(() => ({ signals: [] })),
+    ]);
     return {
       score: Number(d.pulse_score ?? 0),
       tier: String(d.tier ?? 'Bronze'),
-      signals: [],
+      signals: signalsRes?.signals ?? [],
     };
   },
 
   getPulseHistory: async () => {
-    if (USE_MOCK) {
-      await delay(300);
-      return mockJobSeekerPulseHistory;
-    }
-    return [];
+    const data = await v1OkData<PulseHistoryPoint[]>('/credit/pulse-history', { method: 'GET' }).catch(() => []);
+    return Array.isArray(data) ? data : [];
   },
 
   getGigHistory: async (status?: 'completed' | 'cancelled'): Promise<GigRecord[]> => {
-    if (USE_MOCK) {
-      await delay(500);
-      if (!status) return mockJobSeekerGigHistory;
-      return mockJobSeekerGigHistory.filter(g => g.status === status);
-    }
-    const apps = await v1OkData<Record<string, unknown>[]>('/job-seekers/applications', { method: 'GET' });
+    const q = status ? `?status=${status}` : '';
+    const apps = await v1OkData<Record<string, unknown>[]>(`/job-seekers/applications${q}`, { method: 'GET' });
     return (Array.isArray(apps) ? apps : []).map((a) => ({
       id: String(a.gig_id ?? a.id),
-      title: 'Gig',
-      employer: '',
-      date: String(a.applied_at || ''),
-      pay: 0,
-      duration: '',
+      title: String(a.gig_title || 'Gig'),
+      employer: String(a.employer || ''),
+      date: String(a.applied_at || a.completed_at || ''),
+      pay: Math.round(Number(a.pay ?? 0) / 100),
+      duration: String(a.duration || ''),
       status: (String(a.status).toLowerCase().includes('cancel') ? 'cancelled' : 'completed') as GigRecord['status'],
-      rating: null,
-      review: null,
+      rating: a.rating == null ? null : Number(a.rating),
+      review: a.review == null ? null : String(a.review),
     }));
   },
 
   getNotifications: async (type?: 'job' | 'payment' | 'score'): Promise<JSNotification[]> => {
-    if (USE_MOCK) {
-      await delay(400);
-      if (!type) return mockJobSeekerNotifications;
-      return mockJobSeekerNotifications.filter(n => n.type === type);
-    }
-    void type;
-    return [];
+    const q = type ? `?type=${type}` : '';
+    const rows = await v1OkData<Record<string, unknown>[]>(`/job-seekers/notifications${q}`, { method: 'GET' }).catch(() => []);
+    return (Array.isArray(rows) ? rows : []).map((n) => ({
+      id: String(n.id),
+      type: (String(n.type || 'job') as JSNotification['type']),
+      title: String(n.title || ''),
+      body: String(n.body || ''),
+      created_at: String(n.created_at || ''),
+      read: Boolean(n.read),
+    }));
   },
 
   markNotificationsRead: async (): Promise<{ success: boolean }> => {
-    if (USE_MOCK) {
-      await delay(300);
-      return { success: true };
-    }
+    await v1OkData<unknown>('/job-seekers/mark-notifications-read', { method: 'POST', body: '{}' }).catch(() => null);
     return { success: true };
   },
 
   getQRCode: async () => {
-    if (USE_MOCK) {
-      await delay(300);
-      return mockJobSeekerQR;
-    }
+    const d = await v1OkData<Record<string, unknown>>('/job-seekers/qr', { method: 'GET' }).catch(() => null);
+    if (!d) return { customer_identifier: '', zovu_id: '', name: '', skills: [] as string[] };
     return {
-      customer_identifier: '',
-      zovu_id: '',
-      name: '',
-      skills: [] as string[],
+      customer_identifier: String(d.customer_identifier || ''),
+      zovu_id: String(d.zovu_id || ''),
+      name: String(d.name || ''),
+      skills: Array.isArray(d.skills) ? (d.skills as string[]) : [],
     };
+  },
+};
+
+// ─── Ajo ────────────────────────────────────────────────────
+export const ajoAPI = {
+  listGroups: async (): Promise<AjoGroup[]> => {
+    const rows = await v1OkData<Record<string, unknown>[]>('/ajo/groups', { method: 'GET' }).catch(() => []);
+    return (Array.isArray(rows) ? rows : []).map((r) => ({
+      id: String(r.id),
+      name: String(r.name),
+      description: r.description ? String(r.description) : null,
+      minimum_deposit: Math.round(Number(r.minimum_deposit ?? r.contribution_amount ?? 0) / 100),
+      end_date: r.end_date ? String(r.end_date) : null,
+      total_balance: Math.round(Number(r.total_balance ?? 0) / 100),
+      member_count: Number(r.member_count ?? 0),
+      status: String(r.status || 'active'),
+      joined: Boolean(r.joined),
+      total_contributed: r.total_contributed != null ? Math.round(Number(r.total_contributed) / 100) : undefined,
+      estimated_return: r.estimated_return != null ? Math.round(Number(r.estimated_return) / 100) : undefined,
+    }));
+  },
+
+  joinGroup: async (ajoId: string): Promise<{ success: boolean }> => {
+    await v1OkData<unknown>(`/ajo/${ajoId}/join`, { method: 'POST', body: '{}' });
+    return { success: true };
+  },
+
+  contribute: async (ajoId: string, amountNaira: number): Promise<{ success: boolean; squad_account?: string }> => {
+    const res = await v1OkData<{ squad_account?: string }>(`/ajo/${ajoId}/contribute`, {
+      method: 'POST',
+      body: JSON.stringify({ amount: Math.round(amountNaira * 100) }),
+    });
+    return { success: true, squad_account: res?.squad_account };
+  },
+
+  getTransactions: async (): Promise<AjoTransaction[]> => {
+    const rows = await v1OkData<Record<string, unknown>[]>('/ajo/transactions', { method: 'GET' }).catch(() => []);
+    return (Array.isArray(rows) ? rows : []).map((r) => ({
+      id: String(r.id),
+      ajo_id: String(r.ajo_id),
+      ajo_name: String(r.ajo_name || ''),
+      amount: Math.round(Number(r.amount ?? 0) / 100),
+      type: (r.type === 'payout' ? 'payout' : 'contribution') as AjoTransaction['type'],
+      status: String(r.status || 'completed'),
+      timestamp: String(r.timestamp || r.created_at || ''),
+    }));
+  },
+
+  // Admin-only
+  admin: {
+    createGroup: async (payload: {
+      name: string;
+      description?: string;
+      minimum_deposit: number;
+      end_date: string;
+    }) => v1OkData<{ id: string }>('/admin/ajo/groups', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        minimum_deposit: Math.round(payload.minimum_deposit * 100),
+      }),
+    }),
+
+    listGroups: async () => v1OkData<any[]>('/admin/ajo/groups', { method: 'GET' }),
+
+    listTransactions: async () =>
+      v1OkData<any[]>('/admin/ajo/transactions', { method: 'GET' }),
   },
 };
 
