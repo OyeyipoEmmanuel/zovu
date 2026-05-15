@@ -129,3 +129,13 @@ export const submitKyc = (payload: KycPayload) =>
     { ...payload, phone: normalizePhone(payload.phone) },
     true,
   );
+
+export interface SquadRetryResponse {
+  squad_provisioned: boolean;
+  account_number: string | null;
+  bank: string | null;
+  already_provisioned: boolean;
+}
+
+export const retrySquadProvisioning = () =>
+  api.post<SquadRetryResponse>('/auth/squad/retry', {}, true);

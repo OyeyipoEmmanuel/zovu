@@ -492,6 +492,9 @@ async def onboarding_skills(
     user: User = Depends(get_current_user),
 ):
     _require_seeker(user)
+    # `user` is detached from the live session (see notes in auth.submit_kyc).
+    # Without merge, attribute writes are no-ops at commit time.
+    user = await db.merge(user)
     user.skills_list = payload.skills
     user.languages_spoken = payload.languages
     user.primary_language = payload.primary_language or (payload.languages[0] if payload.languages else None)
@@ -506,6 +509,7 @@ async def onboarding_experience(
     user: User = Depends(get_current_user),
 ):
     _require_seeker(user)
+    user = await db.merge(user)
     # Persist into bio as JSON; no dedicated table yet.
     import json as _json
     user.bio = _json.dumps(payload.model_dump())
@@ -520,6 +524,7 @@ async def onboarding_preferences(
     user: User = Depends(get_current_user),
 ):
     _require_seeker(user)
+    user = await db.merge(user)
     user.auto_save_pct = max(0.0, min(1.0, float(payload.auto_save_pct or 0.0) / 100.0 if payload.auto_save_pct > 1 else float(payload.auto_save_pct)))
     user.profile_complete = True
     await db.commit()

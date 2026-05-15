@@ -5,7 +5,8 @@ import { FaWhatsapp } from 'react-icons/fa';
 import { useAuthStore } from '../../../../stores';
 import { copyToClipboard } from '../../../../lib/utils';
 import { fetchKYCStatus } from '../../../../lib/api';
-import { getMe } from '../../../../services/authService';
+import { getMe, retrySquadProvisioning } from '../../../../services/authService';
+import { ApiError } from '../../../../services/api';
 
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 10; // ~30s
@@ -48,7 +49,7 @@ export const Step3Success: React.FC = () => {
         // Direct /auth/me call (bypasses cache but doesn't invalidate it —
         // invalidation triggered every other component on the page to also
         // refetch, causing a request storm).
-        const me = await getMe().catch(() => null);
+        const me = await getMe();
         if (me?.squad_account_number) {
           updateUser({
             squad_provisioned: Boolean(me.squad_provisioned),
@@ -65,8 +66,17 @@ export const Step3Success: React.FC = () => {
             squadVaNumber: status.squad_va_number,
           });
         }
-      } catch {
-        // ignore — we'll retry below
+      } catch (err) {
+        // Stale/invalid session — bail out and route the user back to login
+        // instead of polling forever against a 401.
+        if (err instanceof ApiError && err.status === 401) {
+          if (!cancelled) {
+            setPollExhausted(true);
+            navigate('/login', { replace: true });
+          }
+          return;
+        }
+        // Anything else — fall through to retry below
       } finally {
         if (cancelled) return;
         setPollAttempts((n) => {
@@ -105,9 +115,27 @@ export const Step3Success: React.FC = () => {
     }
   };
 
-  const handleRetryPoll = () => {
+  const handleRetryPoll = async () => {
+    // Force a fresh server-side Squad call before resuming the poll loop —
+    // re-polling /auth/me alone won't help if the original inline call failed
+    // and there's no worker running the Celery retry.
     setPollAttempts(0);
     setPollExhausted(false);
+    try {
+      const res = await retrySquadProvisioning();
+      if (res?.account_number) {
+        updateUser({
+          squad_provisioned: Boolean(res.squad_provisioned),
+          squadVaNumber: res.account_number,
+          squadVaBank: res.bank ?? null,
+        });
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        navigate('/login', { replace: true });
+      }
+      // Other errors fall back to the normal poll loop, which will retry.
+    }
   };
 
   const whatsappText = `Pay me via my Zovu account:\n\nAccount Name: ${user?.firstName} ${user?.lastName}\nAccount Number: ${user?.squadVaNumber}\nBank: ${user?.squadVaBank}\n\nPowered by Zovu ✨`;

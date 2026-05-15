@@ -112,13 +112,42 @@ def retry_squad_provisioning(self, user_id: str):
     except Exception as exc:
         attempt = self.request.retries + 1
         countdown = 10 * (3 ** self.request.retries)
+        err_str = str(exc)
+        # Squad 4xx responses are permanent — retrying an invalid BVN every
+        # 90s won't change the answer. Abandon early so we don't burn logs
+        # and worker capacity.
+        permanent_signals = (
+            "invalid BVN",
+            "invalid bvn",
+            "Validation Failure",
+            "is not allowed",
+            "length must be",
+            '-> 400',
+            '-> 401',
+            '-> 403',
+            '-> 422',
+        )
+        is_permanent = any(s in err_str for s in permanent_signals)
         logger.error(
             "retry_squad_provisioning_attempt_failed",
             user_id=user_id,
             attempt=attempt,
-            next_retry_in=countdown,
-            error=str(exc),
+            next_retry_in=None if is_permanent else countdown,
+            error=err_str,
+            permanent=is_permanent,
         )
+        if is_permanent:
+            logger.error(
+                "retry_squad_provisioning_abandoned_permanent",
+                user_id=user_id,
+                error=err_str,
+                hint=(
+                    "Squad rejected the payload as invalid. In sandbox this "
+                    "usually means the BVN isn't one of Squad's test values "
+                    "(e.g. 22222222226). On live keys, any real BVN works."
+                ),
+            )
+            return
         if self.request.retries >= self.max_retries:
             logger.error(
                 "retry_squad_provisioning_exhausted",

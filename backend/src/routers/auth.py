@@ -240,6 +240,13 @@ async def submit_kyc(
         bvn_encrypted = encrypt_pii(req.bvn) if req.bvn else None
         nin_encrypted = encrypt_pii(req.nin) if req.nin else None
 
+        # `user` came from `get_current_user`, whose session was closed when
+        # that dependency exited — so the instance is detached. Re-attach it
+        # to the live route-handler session before mutating, otherwise the
+        # commit is a silent no-op (we observed this in docker logs: ROLLBACK
+        # with no preceding UPDATE).
+        user = await db.merge(user)
+
         user.first_name = req.first_name
         user.last_name = req.last_name
         user.date_of_birth = req.date_of_birth
@@ -249,21 +256,16 @@ async def submit_kyc(
         # middle_name, gender, address aren't persisted on User yet (no migration);
         # we keep them in-request so the inline Squad call has them.
 
-        # The user has supplied every required field — their profile IS complete.
-        # `profile_complete` gates the dashboard banner and the KYC modal; without
-        # flipping it here the user gets re-prompted forever because /auth/me keeps
-        # returning False.
         user.profile_complete = True
 
         # In non-production environments there is no Celery worker running the
         # `verify_kyc_documents` task, so `kyc_verified` would stay False forever
-        # and the frontend KYC guard would keep blocking access. Treat a
-        # well-formed submission as verified outside production; prod still waits
-        # for the async fraud task to flip this.
+        # and the frontend KYC guard would keep blocking access.
         if settings.ENVIRONMENT != "production":
             user.kyc_verified = True
 
         await db.commit()
+        await db.refresh(user)
 
         try:
             from src.workers.fraud_tasks import verify_kyc_documents
@@ -338,4 +340,91 @@ async def submit_kyc(
             status_code=500,
             code="KYC_SUBMISSION_FAILED",
             message="KYC submission failed. Please try again.",
+        )
+
+
+# ------------------------------------------------------------------ #
+#  POST /squad/retry — re-run inline Squad VA provisioning            #
+# ------------------------------------------------------------------ #
+
+@router.post("/squad/retry", summary="Manually retry Squad virtual account creation")
+async def retry_squad_provisioning_endpoint(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_blacklist_dep),
+):
+    """Used by Step3Success "Check again" — re-runs the inline Squad call
+    using the BVN/phone already on file. Useful when the original KYC
+    submission failed because Squad rejected the payload or the network
+    blipped.
+
+    Idempotent: returns the existing account immediately if already provisioned.
+    """
+    from src.core.security import decrypt_pii
+
+    # Re-attach `user` to the live session for the same reason as /kyc.
+    user = await db.merge(user)
+
+    if user.squad_provisioned and user.squad_account_number:
+        return _ok({
+            "squad_provisioned": True,
+            "account_number": user.squad_account_number,
+            "bank": user.squad_account_bank,
+            "already_provisioned": True,
+        })
+
+    if not user.bvn or not user.phone:
+        raise ZovuAPIError(
+            status_code=400,
+            code="KYC_NOT_SUBMITTED",
+            message="Submit KYC before retrying Squad provisioning.",
+        )
+
+    try:
+        bvn_plain = decrypt_pii(user.bvn)
+        phone_plain = decrypt_pii(user.phone)
+    except Exception as exc:
+        logger.error("squad_retry_pii_decrypt_failed", user_id=user.id, error=str(exc))
+        raise ZovuAPIError(
+            status_code=500,
+            code="PII_DECRYPT_FAILED",
+            message="Could not read your stored KYC details. Please re-submit KYC.",
+        )
+
+    dob_str = (
+        user.date_of_birth.strftime("%m/%d/%Y")
+        if user.date_of_birth is not None
+        else None
+    )
+
+    try:
+        import httpx
+        from src.services.squad import SquadService
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(http=http, db=db, redis=redis)
+            va = await squad.create_virtual_account(
+                user,
+                bvn=bvn_plain,
+                phone=phone_plain,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                middle_name=user.first_name,  # No middle_name column on User
+                dob=dob_str,
+                gender="1",
+                address="Nigeria",
+            )
+        return _ok({
+            "squad_provisioned": True,
+            "account_number": va.get("account_number"),
+            "bank": va.get("bank"),
+            "already_provisioned": False,
+        })
+    except Exception as exc:
+        logger.error("squad_retry_failed", user_id=user.id, error=str(exc))
+        raise ZovuAPIError(
+            status_code=502,
+            code="SQUAD_UNAVAILABLE",
+            message=(
+                "We could not reach Squad just now. Please try again in a moment."
+            ),
         )
