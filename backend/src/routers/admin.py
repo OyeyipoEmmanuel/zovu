@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis import Redis
 from uuid import UUID
-from datetime import date
+from datetime import date, timezone
 import structlog
 
 from src.dependencies import get_db, get_redis_cache_dep, require_admin, get_current_user
@@ -86,7 +86,38 @@ async def create_complaint(
         description=description,
         urgency=urgency,
     )
+    await db.commit()
     return {"ok": True, "data": data}
+
+
+@router.get("/complaints/mine")
+async def list_my_complaints(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Authenticated user lists complaints they have filed."""
+    from src.models.admin import Complaint
+    q = (
+        select(Complaint)
+        .where(Complaint.complainant_id == user.id)
+        .order_by(Complaint.created_at.desc())
+    )
+    rows = (await db.execute(q)).scalars().all()
+    return {"ok": True, "data": [
+        {
+            "id": c.id,
+            "transaction_id": c.transaction_id,
+            "category": c.category,
+            "description": c.description,
+            "status": c.status,
+            "urgency": c.urgency,
+            "resolution": c.resolution,
+            "admin_notes": c.admin_notes,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
+        }
+        for c in rows
+    ]}
 
 
 @router.post("/complaints/{complaint_id}/verify-squad")
@@ -556,13 +587,23 @@ async def admin_create_ajo(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Admin-only: create a new Ajo group. Only admins can manage Ajos."""
+    """
+    Admin-only: create a new Ajo group. A static virtual account is
+    auto-assigned from the configured AJO_SQUAD_MERCHANT_ACCOUNT so
+    members can deposit funds directly.
+    """
     if payload.minimum_deposit <= 0:
         raise ZovuAPIError(400, "INVALID_AMOUNT", "minimum_deposit must be positive (kobo)")
     if payload.end_date <= datetime.now(tz=payload.end_date.tzinfo or None):
         raise ZovuAPIError(400, "INVALID_DATE", "end_date must be in the future")
 
     merchant = getattr(settings, "AJO_SQUAD_MERCHANT_ACCOUNT", None) or getattr(settings, "SQUAD_MERCHANT_ACCOUNT_NUMBER", None)
+    if not merchant:
+        raise ZovuAPIError(
+            400,
+            "MERCHANT_NOT_CONFIGURED",
+            "Set AJO_SQUAD_MERCHANT_ACCOUNT in the backend .env to create Ajos.",
+        )
 
     ajo = Ajo(
         name=payload.name,
@@ -577,15 +618,38 @@ async def admin_create_ajo(
         merchant_squad_account=merchant,
     )
     db.add(ajo)
+    await db.flush()
+
+    # Audit
+    from src.models.admin import AdminAuditLog
+    db.add(AdminAuditLog(
+        admin_id=admin.id,
+        admin_email=admin.email,
+        action="ajo.created",
+        target_type="ajo",
+        target_id=ajo.id,
+        before_state={},
+        after_state={
+            "name": ajo.name,
+            "minimum_deposit": ajo.contribution_amount,
+            "merchant_squad_account": merchant,
+            "end_date": ajo.end_date.isoformat() if ajo.end_date else None,
+        },
+    ))
+
     await db.commit()
     await db.refresh(ajo)
 
     return {"ok": True, "data": {
         "id": ajo.id,
         "name": ajo.name,
+        "description": ajo.description,
         "minimum_deposit": ajo.contribution_amount,
         "end_date": ajo.end_date.isoformat() if ajo.end_date else None,
+        "max_members": ajo.max_members,
         "merchant_squad_account": ajo.merchant_squad_account,
+        "static_va": ajo.merchant_squad_account,
+        "status": ajo.status,
     }}
 
 
@@ -614,6 +678,185 @@ async def admin_list_ajo_groups(
             "created_at": ajo.created_at.isoformat() if ajo.created_at else None,
         })
     return {"ok": True, "data": out}
+
+
+# ── LENDER / PARTNER APPROVAL ──────────────────────────────
+
+
+@router.get("/partners/pending")
+async def list_pending_partners(
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List lender/partner accounts awaiting admin approval."""
+    q = (
+        select(User)
+        .where(User.role == "lender")
+        .where(User.partner_approved == False)  # noqa: E712
+        .where(User.is_banned == False)  # noqa: E712
+        .order_by(User.created_at.desc())
+    )
+    rows = (await db.execute(q)).scalars().all()
+    return {"ok": True, "data": [
+        {
+            "id": u.id,
+            "email": u.email,
+            "company_name": u.company_name,
+            "full_name": u.full_name,
+            "email_verified": bool(u.email_verified),
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        }
+        for u in rows
+    ]}
+
+
+@router.post("/partners/{user_id}/approve")
+async def approve_partner(
+    user_id: UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Mark a lender/partner account as approved so they can post services."""
+    user = await db.get(User, str(user_id))
+    if not user or (user.role or "").lower() != "lender":
+        raise ZovuAPIError(404, "USER_NOT_FOUND", "Partner account not found")
+    if user.partner_approved:
+        return {"ok": True, "data": {"id": user.id, "partner_approved": True}}
+
+    user.partner_approved = True
+    user.partner_approved_at = datetime.now(timezone.utc)
+
+    from src.models.admin import AdminAuditLog
+    db.add(AdminAuditLog(
+        admin_id=admin.id,
+        admin_email=admin.email,
+        action="partner.approved",
+        target_type="user",
+        target_id=user.id,
+        before_state={"partner_approved": False},
+        after_state={"partner_approved": True},
+    ))
+
+    await db.commit()
+
+    # Best-effort notification email
+    try:
+        from src.services.email_service import EmailService
+        from src.config import settings as _s
+        svc = EmailService()
+        html = (
+            f"<html><body style='font-family:DM Sans,sans-serif;'>"
+            f"<h2>You're approved!</h2>"
+            f"<p>Hi {user.company_name or 'partner'},</p>"
+            f"<p>Your Zovu partner account has been approved. You can now post loan or insurance services from your dashboard.</p>"
+            f"<p>— The Zovu team</p>"
+            f"</body></html>"
+        )
+        await svc._send(user.email, "Your Zovu partner account is approved", html)
+    except Exception:
+        pass
+
+    return {"ok": True, "data": {"id": user.id, "partner_approved": True}}
+
+
+@router.post("/partners/{user_id}/revoke")
+async def revoke_partner(
+    user_id: UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Revoke partner approval (account cannot post new services)."""
+    user = await db.get(User, str(user_id))
+    if not user or (user.role or "").lower() != "lender":
+        raise ZovuAPIError(404, "USER_NOT_FOUND", "Partner account not found")
+    user.partner_approved = False
+    user.partner_approved_at = None
+
+    from src.models.admin import AdminAuditLog
+    db.add(AdminAuditLog(
+        admin_id=admin.id,
+        admin_email=admin.email,
+        action="partner.revoked",
+        target_type="user",
+        target_id=user.id,
+        before_state={"partner_approved": True},
+        after_state={"partner_approved": False},
+    ))
+    await db.commit()
+    return {"ok": True, "data": {"id": user.id, "partner_approved": False}}
+
+
+# ── ADMIN-FILED COMPLAINTS / FRAUD-FIELD AUDIT ─────────────
+
+
+@router.get("/fraud/users/{user_id}/fields")
+async def get_user_fraud_fields(
+    user_id: UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Return all fields used in fraud detection for a user — used by the admin
+    fraud screen so reviewers can see what signals contributed to the risk
+    score.
+    """
+    from src.services.fraud_service import FraudService
+    from src.models import UserFlag, Transaction, Device
+    from sqlalchemy import and_, or_
+
+    user = await db.get(User, str(user_id))
+    if not user:
+        raise ZovuAPIError(404, "USER_NOT_FOUND", "User not found")
+
+    svc = FraudService(db)
+    score = await svc.calculate_fraud_score(user_id)
+
+    flags_q = select(UserFlag).where(UserFlag.user_id == str(user_id)).order_by(UserFlag.created_at.desc())
+    flags = (await db.execute(flags_q)).scalars().all()
+
+    failed_tx_q = select(func.count(Transaction.id)).where(
+        and_(
+            or_(Transaction.sender_id == str(user_id), Transaction.receiver_id == str(user_id)),
+            Transaction.status == "FAILED",
+        )
+    )
+    failed_tx = (await db.execute(failed_tx_q)).scalar() or 0
+
+    device_count_q = select(func.count(Device.id)).where(Device.user_id == str(user_id))
+    device_count = (await db.execute(device_count_q)).scalar() or 0
+
+    return {"ok": True, "data": {
+        "user_id": user.id,
+        "fraud_risk_score": score,
+        "is_banned": bool(user.is_banned),
+        "ban_reason": user.ban_reason,
+        "kyc_verified": bool(user.kyc_verified),
+        "email": user.email,
+        "role": user.role,
+        "pulse_score": int(user.pulse_score or 0),
+        "compliance_flags": user.compliance_flags or [],
+        "failed_transactions_total": int(failed_tx),
+        "devices_count": int(device_count),
+        "active_flags": [
+            {
+                "id": f.id,
+                "reason": f.flag_reason,
+                "risk_score": f.fraud_risk_score,
+                "status": f.flag_status,
+                "flagged_by": f.flagged_by,
+                "admin_notes": f.admin_notes,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+            }
+            for f in flags
+        ],
+        "weights": {
+            "complaint_weight": FraudService.COMPLAINT_WEIGHT,
+            "chargeback_weight": FraudService.CHARGEBACK_WEIGHT,
+            "failed_tx_weight": FraudService.FAILED_TX_WEIGHT,
+            "device_anomaly_weight": FraudService.DEVICE_ANOMALY_WEIGHT,
+            "normalization_divisor": FraudService.NORMALIZATION_DIVISOR,
+        },
+    }}
 
 
 @router.get("/squad/health")

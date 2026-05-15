@@ -235,6 +235,30 @@ class AuthorizeCardRequest(BaseModel):
     card_token: str
 
 
+class TraderDepositRequest(BaseModel):
+    """Trader funds their Squad wallet to pay job seekers."""
+    amount_kobo: int
+    callback_url: str
+    metadata: Optional[dict] = None
+
+
+class TraderPaySeekerRequest(BaseModel):
+    """Trader pays an on-platform job seeker by user id."""
+    seeker_id: str
+    amount_kobo: int
+    gig_id: Optional[str] = None
+    narration: Optional[str] = None
+
+
+class SquadTransferRequest(BaseModel):
+    """Off-platform Squad payout: pay to an external bank account."""
+    account_number: str
+    bank_code: str
+    amount_kobo: int
+    narration: str
+    account_name: Optional[str] = None
+
+
 # ------------------------------------------------------------------ #
 #  Payment endpoints                                                   #
 # ------------------------------------------------------------------ #
@@ -369,3 +393,270 @@ async def authorize_card_payment(
         raise HTTPException(status_code=502, detail=str(exc))
 
     return result
+
+
+# ------------------------------------------------------------------ #
+#  Trader → Squad wallet deposit                                       #
+# ------------------------------------------------------------------ #
+
+
+@router.post(
+    "/squad/deposit",
+    response_model=dict,
+    tags=["Transactions"],
+    summary="Trader deposit into Squad ledger",
+)
+async def squad_deposit(
+    body: TraderDepositRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
+):
+    """
+    Start a Squad checkout that deposits funds into the trader's Squad wallet.
+    The trader's funded balance is then drawn from by /squad/transfer-to-seeker
+    when they pay job seekers after a gig is complete.
+
+    Funds land in the configured AJO_SQUAD_MERCHANT_ACCOUNT and a pending
+    Transaction ledger row is created. The webhook reconciles the deposit.
+    """
+    if body.amount_kobo <= 0:
+        raise HTTPException(status_code=400, detail="amount_kobo must be > 0")
+
+    from src.core.exceptions import ZovuAPIError
+    from src.models.base import TransactionType
+    reference = f"zovu-deposit-{uuid.uuid4().hex}"
+
+    tx = Transaction(
+        sender_id=user.id,  # trader funding their own wallet
+        receiver_id=None,
+        transaction_type=TransactionType.CREDIT_DEPOSIT,
+        amount=body.amount_kobo,
+        amount_gross=body.amount_kobo,
+        direction="credit",  # increases trader's balance once settled
+        status="pending",
+        method="squad_checkout",
+        squad_reference=reference,
+        tx_metadata={
+            "purpose": "squad_wallet_deposit",
+            "user_id": user.id,
+            **(body.metadata or {}),
+        },
+    )
+    db.add(tx)
+    await db.flush()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(db=db, redis=redis, http=http)
+            session = await squad.initiate_payment(
+                email=user.email,
+                amount_kobo=body.amount_kobo,
+                reference=reference,
+                callback_url=body.callback_url,
+                metadata={
+                    "purpose": "squad_wallet_deposit",
+                    "user_id": user.id,
+                    "transaction_id": tx.id,
+                },
+            )
+    except ExternalServiceError as exc:
+        await db.commit()  # keep the pending tx for retry
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    meta = dict(tx.tx_metadata or {})
+    meta["squad_checkout_url"] = session.get("checkout_url")
+    tx.tx_metadata = meta
+    await db.commit()
+
+    return {
+        "ok": True,
+        "data": {
+            "transaction_id": tx.id,
+            "squad_reference": reference,
+            "checkout_url": session.get("checkout_url"),
+            "amount_kobo": body.amount_kobo,
+            "status": "pending",
+        },
+    }
+
+
+@router.post(
+    "/squad/transfer-to-seeker",
+    response_model=dict,
+    tags=["Transactions"],
+    summary="Trader pays a job seeker via Squad transfer",
+)
+async def squad_transfer_to_seeker(
+    body: TraderPaySeekerRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
+):
+    """
+    After a gig is completed, a trader can pay the assigned job seeker.
+    The seeker must have a provisioned Squad virtual account.
+    """
+    from src.core.exceptions import ZovuAPIError
+    from src.models.base import TransactionType, GigStatus
+
+    if body.amount_kobo <= 0:
+        raise ZovuAPIError(status_code=400, code="INVALID_AMOUNT", message="amount_kobo must be > 0")
+
+    seeker_q = select(User).where(User.id == body.seeker_id)
+    seeker = (await db.execute(seeker_q)).scalar_one_or_none()
+    if not seeker:
+        raise ZovuAPIError(status_code=404, code="SEEKER_NOT_FOUND", message="Job seeker not found")
+    if not seeker.squad_account_number or not seeker.squad_account_bank:
+        raise ZovuAPIError(
+            status_code=400,
+            code="SEEKER_HAS_NO_VA",
+            message="The job seeker hasn't been provisioned with a Squad virtual account yet (KYC pending).",
+        )
+
+    # Optional gig check — make sure the trader owns the gig and it's completed
+    if body.gig_id:
+        from src.models.base import Gig
+        gig = await db.get(Gig, body.gig_id)
+        if not gig:
+            raise ZovuAPIError(status_code=404, code="GIG_NOT_FOUND", message="Gig not found")
+        if gig.trader_id != user.id:
+            raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Not your gig")
+        if gig.status not in (GigStatus.COMPLETED, GigStatus.IN_PROGRESS):
+            raise ZovuAPIError(
+                status_code=409,
+                code="GIG_NOT_PAYABLE",
+                message="Only in-progress or completed gigs can be paid out.",
+            )
+
+    reference = f"zovu-gigpay-{uuid.uuid4().hex}"
+    narration = (body.narration or f"Zovu gig payment from {user.email} to {seeker.email}")[:90]
+
+    tx = Transaction(
+        sender_id=user.id,
+        receiver_id=seeker.id,
+        transaction_type=TransactionType.CREDIT_WITHDRAWAL,
+        amount=body.amount_kobo,
+        amount_gross=body.amount_kobo,
+        direction="debit",
+        status="pending",
+        method="squad_transfer",
+        squad_reference=reference,
+        tx_metadata={
+            "purpose": "trader_to_seeker_payout",
+            "trader_id": user.id,
+            "seeker_id": seeker.id,
+            "gig_id": body.gig_id,
+        },
+    )
+    db.add(tx)
+    await db.flush()
+
+    # Try the Squad transfer. The seeker's bank_code lives in `squad_account_bank`
+    # (we keep the bank name; we lookup the NIP code via SQUAD_BANK_CODE_TO_NAME).
+    from src.services.squad import SQUAD_BANK_CODE_TO_NAME
+    bank_code = ""
+    for code, name in SQUAD_BANK_CODE_TO_NAME.items():
+        if name.lower() == (seeker.squad_account_bank or "").lower():
+            bank_code = code
+            break
+    if not bank_code:
+        # Default to GTBank (Squad's primary issuing partner) as a fallback.
+        bank_code = "058"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(db=db, redis=redis, http=http)
+            result = await squad.transfer_funds(
+                recipient_account=seeker.squad_account_number,
+                bank_code=bank_code,
+                amount_kobo=body.amount_kobo,
+                reference=reference,
+                narration=narration,
+            )
+        tx.status = "completed" if (result.get("status") or "").lower() in ("success", "successful", "completed") else "processing"
+        meta = dict(tx.tx_metadata or {})
+        meta["squad_transaction_id"] = result.get("squad_transaction_id")
+        meta["squad_status"] = result.get("status")
+        meta["nip_session_id"] = result.get("nip_session_id")
+        tx.tx_metadata = meta
+        await db.commit()
+
+        return {"ok": True, "data": {
+            "transaction_id": tx.id,
+            "squad_reference": reference,
+            "status": tx.status,
+            "amount_kobo": body.amount_kobo,
+            "seeker_id": seeker.id,
+            "seeker_account": seeker.squad_account_number,
+        }}
+    except ExternalServiceError as exc:
+        tx.status = "failed"
+        meta = dict(tx.tx_metadata or {})
+        meta["error"] = str(exc.detail) if hasattr(exc, "detail") else str(exc)
+        tx.tx_metadata = meta
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.post(
+    "/squad/transfer",
+    response_model=dict,
+    tags=["Transactions"],
+    summary="Generic Squad payout to an external bank account",
+)
+async def squad_transfer(
+    body: SquadTransferRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis_cache),
+):
+    if body.amount_kobo <= 0:
+        raise HTTPException(status_code=400, detail="amount_kobo must be > 0")
+
+    from src.models.base import TransactionType
+
+    reference = f"zovu-txout-{uuid.uuid4().hex}"
+    tx = Transaction(
+        sender_id=user.id,
+        receiver_id=None,
+        transaction_type=TransactionType.CREDIT_WITHDRAWAL,
+        amount=body.amount_kobo,
+        amount_gross=body.amount_kobo,
+        direction="debit",
+        status="pending",
+        method="squad_transfer",
+        squad_reference=reference,
+        tx_metadata={
+            "purpose": "external_payout",
+            "user_id": user.id,
+            "bank_code": body.bank_code,
+            "account_number": body.account_number,
+        },
+    )
+    db.add(tx)
+    await db.flush()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            squad = SquadService(db=db, redis=redis, http=http)
+            result = await squad.transfer_funds(
+                recipient_account=body.account_number,
+                bank_code=body.bank_code,
+                amount_kobo=body.amount_kobo,
+                reference=reference,
+                narration=body.narration[:90],
+                account_name=body.account_name,
+            )
+        tx.status = "completed" if (result.get("status") or "").lower() in ("success", "successful", "completed") else "processing"
+        await db.commit()
+        return {"ok": True, "data": {
+            "transaction_id": tx.id,
+            "squad_reference": reference,
+            "status": tx.status,
+            "result": result,
+        }}
+    except ExternalServiceError as exc:
+        tx.status = "failed"
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))

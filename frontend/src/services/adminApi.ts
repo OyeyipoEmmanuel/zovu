@@ -92,6 +92,39 @@ export const adminPartnershipsAPI = {
     request(`/admin/partnerships/${id}`, { method: "PUT", body }),
 };
 
+// ── PARTNER APPROVAL (lender accounts) ─────────────
+export const adminPartnerAPI = {
+  listPending: () => request("/admin/partners/pending"),
+
+  approve: (userId: string) =>
+    request(`/admin/partners/${userId}/approve`, { method: "POST" }),
+
+  revoke: (userId: string) =>
+    request(`/admin/partners/${userId}/revoke`, { method: "POST" }),
+};
+
+// ── ADMIN AJO ──────────────────────────────────────
+export const adminAjoAPI = {
+  listGroups: () => request("/admin/ajo/groups"),
+
+  createGroup: (body: {
+    name: string;
+    description?: string;
+    minimum_deposit: number;      // kobo
+    end_date: string;             // ISO string
+    max_members?: number;
+  }) => request("/admin/ajo/groups", { method: "POST", body: body as any }),
+
+  listTransactions: (params?: { limit?: number; ajo_id?: string }) =>
+    request("/admin/ajo/transactions", { params }),
+};
+
+// ── FRAUD FIELD AUDIT ──────────────────────────────
+export const adminFraudFieldsAPI = {
+  getForUser: (userId: string) =>
+    request(`/admin/fraud/users/${userId}/fields`),
+};
+
 // ── AUDIT ──────────────────────────────────────────
 export const adminAuditAPI = {
   getLog: (params: {

@@ -101,6 +101,7 @@ async def register(
         business_name=req.business_name,
         full_name=req.full_name,
         company_name=req.company_name,
+        phone=req.phone,
     )
     return _ok(data, status_code=201)
 

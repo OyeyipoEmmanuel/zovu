@@ -4,5 +4,6 @@ export { PulseScore } from './PulseScore';
 export { PostGig } from './PostGig';
 export { Payments } from './Payments';
 export { Settings } from './Settings';
+export { Applicants } from './Applicants';
 export * from './CompleteProfile';
 export { LoanFlowModal } from './LoanFlowModal';

@@ -52,6 +52,7 @@ export const Signup: React.FC = () => {
       email: '',
       password: '',
       confirmPassword: '',
+      phone: '',
       role: initialRole,
       business_name: '',
       full_name: '',
@@ -69,6 +70,7 @@ export const Signup: React.FC = () => {
         email: data.email,
         password: data.password,
         confirm_password: data.confirmPassword,
+        phone: data.phone,
         ...(data.role === 'trader' && { business_name: data.business_name }),
         ...(data.role === 'job_seeker' && { full_name: data.full_name }),
         ...(data.role === 'partner' && { company_name: data.company_name }),
@@ -264,6 +266,26 @@ export const Signup: React.FC = () => {
             {...register('email')}
           />
         </FormField>
+
+        {/* Phone — required for trader & job seeker */}
+        {(role === 'trader' || role === 'job_seeker') && (
+          <FormField
+            label="Phone Number"
+            id="phone"
+            error={errors.phone}
+            hint="Used for transaction alerts and account recovery"
+          >
+            <TextInput
+              id="phone"
+              type="tel"
+              inputMode="tel"
+              placeholder="08012345678 or +2348012345678"
+              autoComplete="tel"
+              hasError={!!errors.phone}
+              {...register('phone')}
+            />
+          </FormField>
+        )}
 
         {/* Role-specific name field */}
         {role === 'trader' && (

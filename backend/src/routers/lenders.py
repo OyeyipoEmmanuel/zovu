@@ -124,6 +124,41 @@ def _require_lender_role(user: User) -> None:
         raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Lender role required")
 
 
+def _require_approved_lender(user: User) -> None:
+    """Lenders/partners must be approved by admin before posting services."""
+    _require_lender_role(user)
+    role = (user.role or "").lower()
+    if role == "admin":
+        return
+    if not bool(getattr(user, "partner_approved", False)):
+        raise ZovuAPIError(
+            status_code=403,
+            code="PARTNER_NOT_APPROVED",
+            message=(
+                "Your partner account is pending admin approval. "
+                "You cannot post services until an admin approves your account."
+            ),
+        )
+
+
+LENDER_ALLOWED_SERVICE_TYPES = {"loan", "insurance"}
+
+
+def _validate_service_payload(stype: str, payload: "OfferServiceRequest") -> None:
+    if stype == "loan":
+        if not payload.max_amount or payload.max_amount <= 0:
+            raise ZovuAPIError(400, "VALIDATION_ERROR", "Loan products require max_amount (kobo, > 0)", field="max_amount")
+        if payload.interest_rate is None or payload.interest_rate < 0:
+            raise ZovuAPIError(400, "VALIDATION_ERROR", "Loan products require interest_rate (% per month)", field="interest_rate")
+        if not payload.repayment_days or payload.repayment_days <= 0:
+            raise ZovuAPIError(400, "VALIDATION_ERROR", "Loan products require repayment_days (> 0)", field="repayment_days")
+    elif stype == "insurance":
+        if not payload.premium_amount or payload.premium_amount <= 0:
+            raise ZovuAPIError(400, "VALIDATION_ERROR", "Insurance products require premium_amount (kobo, > 0)", field="premium_amount")
+        if not payload.max_amount or payload.max_amount <= 0:
+            raise ZovuAPIError(400, "VALIDATION_ERROR", "Insurance products require max_amount (coverage in kobo, > 0)", field="max_amount")
+
+
 def _service_to_dict(svc: LenderServiceOffering) -> dict:
     return {
         "id": svc.id,
@@ -143,13 +178,13 @@ def _service_to_dict(svc: LenderServiceOffering) -> dict:
 
 class OfferServiceRequest(BaseModel):
     name: str
-    type: str  # loan | insurance | savings
+    type: str  # loan | insurance — partners cannot post savings
     description: str | None = None
     min_pulse_score: int = 0
-    max_amount: int | None = None  # kobo
-    interest_rate: float | None = None
-    premium_amount: int | None = None  # kobo
-    repayment_days: int | None = None
+    max_amount: int | None = None  # kobo (loan: principal cap; insurance: coverage)
+    interest_rate: float | None = None  # loan only
+    premium_amount: int | None = None  # kobo — insurance only
+    repayment_days: int | None = None  # loan only
 
 
 class UpdateServiceRequest(BaseModel):
@@ -169,14 +204,21 @@ async def offer_service(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _require_lender_role(user)
-    if payload.type not in ("loan", "insurance", "savings"):
-        raise ZovuAPIError(status_code=400, code="INVALID_TYPE", message="type must be loan, insurance, or savings", field="type")
+    _require_approved_lender(user)
+    stype = (payload.type or "").lower()
+    if stype not in LENDER_ALLOWED_SERVICE_TYPES:
+        raise ZovuAPIError(
+            status_code=400,
+            code="INVALID_TYPE",
+            message="Partners can only post loan or insurance services",
+            field="type",
+        )
+    _validate_service_payload(stype, payload)
 
     svc = LenderServiceOffering(
         lender_id=user.id,
         name=payload.name,
-        type=payload.type,
+        type=stype,
         description=payload.description,
         min_pulse_score=max(0, min(850, int(payload.min_pulse_score or 0))),
         max_amount=payload.max_amount,
@@ -198,9 +240,10 @@ async def list_services(
     user: User = Depends(get_current_user),
 ):
     _require_lender_role(user)
+    # Hard scope to the authenticated lender's own offerings
     q = select(LenderServiceOffering).where(LenderServiceOffering.lender_id == user.id)
     if type:
-        q = q.where(LenderServiceOffering.type == type)
+        q = q.where(LenderServiceOffering.type == type.lower())
     rows = (await db.execute(q.order_by(LenderServiceOffering.created_at.desc()))).scalars().all()
     return {"ok": True, "data": [_service_to_dict(s) for s in rows]}
 
@@ -225,7 +268,7 @@ async def update_service(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _require_lender_role(user)
+    _require_approved_lender(user)
     svc = await db.get(LenderServiceOffering, service_id)
     if not svc or svc.lender_id != user.id:
         raise ZovuAPIError(status_code=404, code="NOT_FOUND", message="Service offering not found")
@@ -234,3 +277,63 @@ async def update_service(
     await db.commit()
     await db.refresh(svc)
     return {"ok": True, "data": _service_to_dict(svc)}
+
+
+@router.delete("/services/{service_id}", response_model=dict, summary="Archive my service offering")
+async def archive_service(
+    service_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _require_approved_lender(user)
+    svc = await db.get(LenderServiceOffering, service_id)
+    if not svc or svc.lender_id != user.id:
+        raise ZovuAPIError(status_code=404, code="NOT_FOUND", message="Service offering not found")
+    svc.status = "archived"
+    await db.commit()
+    return {"ok": True, "data": {"id": service_id, "status": "archived"}}
+
+
+# ── Public Services Marketplace (approved partners only) ─────────────────────
+
+
+@router.get("/services-marketplace", response_model=dict, summary="List services offered by approved partners")
+async def list_services_marketplace(
+    type: str | None = Query(None, description="loan | insurance"),
+    min_pulse_score: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Surface only services that come from admin-approved lenders/partners.
+    Used by the Services tab on trader and job seeker dashboards.
+    """
+    q = (
+        select(LenderServiceOffering, User)
+        .join(User, User.id == LenderServiceOffering.lender_id)
+        .where(
+            and_(
+                LenderServiceOffering.status == "active",
+                User.partner_approved == True,  # noqa: E712
+                User.is_banned == False,  # noqa: E712
+            )
+        )
+    )
+    if type:
+        q = q.where(LenderServiceOffering.type == type.lower())
+    if min_pulse_score is not None:
+        q = q.where(LenderServiceOffering.min_pulse_score <= min_pulse_score)
+    q = q.order_by(LenderServiceOffering.created_at.desc())
+
+    rows = (await db.execute(q)).all()
+    out: list[dict] = []
+    for svc, lender in rows:
+        out.append({
+            **_service_to_dict(svc),
+            "lender": {
+                "id": lender.id,
+                "company_name": lender.company_name or lender.business_name or lender.email,
+                "email": lender.email,
+            },
+        })
+    return {"ok": True, "data": out}

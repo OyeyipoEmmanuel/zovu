@@ -164,6 +164,22 @@ export const AjoTab: React.FC = () => {
               </div>
             )}
 
+            {g.merchant_squad_account && (
+              <div className="bg-[#0D0D0D] border border-[#1A6B4A]/30 rounded-[8px] p-3 flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-dm text-[10px] text-[#A0A0A0] uppercase">Deposit account</div>
+                  <div className="font-mono text-[13px] text-[#F5F5F5]">{g.merchant_squad_account}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(g.merchant_squad_account!)}
+                  className="px-3 py-1.5 bg-[#1A6B4A]/10 text-[#1A6B4A] font-dm text-[12px] rounded-[6px]"
+                >
+                  Copy
+                </button>
+              </div>
+            )}
+
             {g.joined ? (
               <div className="flex items-center gap-2">
                 <input

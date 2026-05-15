@@ -19,6 +19,7 @@ class RegisterSchema(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     confirm_password: str
+    phone: Optional[str] = Field(None, pattern=r"^\+?\d{10,15}$")  # required for trader/job_seeker
     business_name: Optional[str] = Field(None, min_length=1)   # required if role=trader
     full_name: Optional[str] = Field(None, min_length=1)        # required if role=job_seeker
     company_name: Optional[str] = Field(None, min_length=1)     # required if role=lender
@@ -30,6 +31,7 @@ class RegisterSchema(BaseModel):
                 "email": "mamatunde@test.com",
                 "password": "ZovuTest@123",
                 "confirm_password": "ZovuTest@123",
+                "phone": "+2348012345678",
                 "business_name": "Mama Tunde Provisions"
             }
         }
@@ -155,6 +157,7 @@ class UserProfileSchema(BaseModel):
     squad_provisioned: bool = False
     profile_complete: bool = False
     is_banned: bool = False
+    partner_approved: bool = False
     created_at: datetime
 
     class Config:

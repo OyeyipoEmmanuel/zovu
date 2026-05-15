@@ -6,6 +6,7 @@ import React, { useState } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { adminMetricsAPI } from "@/services/adminApi";
+import { LogoutButton } from "../shared/LogoutButton";
 
 interface NavItem {
   label: string;
@@ -56,6 +57,11 @@ export const AdminLayout: React.FC = () => {
       icon: "🤝",
       path: "/admin/partnerships",
       badge: alerts.pending_partnerships,
+    },
+    {
+      label: "Ajo",
+      icon: "🪙",
+      path: "/admin/ajo",
     },
     {
       label: "Audit Log",
@@ -120,11 +126,18 @@ export const AdminLayout: React.FC = () => {
           })}
         </nav>
 
-        {/* Toggle */}
-        <div className="p-4 border-t border-white/8">
+        {/* Footer: logout + toggle */}
+        <div className="p-4 border-t border-white/8 flex flex-col gap-2">
+          {sidebarOpen ? (
+            <LogoutButton variant="sidebar" />
+          ) : (
+            <LogoutButton variant="icon" label="" />
+          )}
           <button
+            type="button"
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="w-full p-2 hover:bg-white/5 rounded-lg text-white/60 text-sm"
+            aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
           >
             {sidebarOpen ? "←" : "→"}
           </button>

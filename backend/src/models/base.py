@@ -202,6 +202,10 @@ class User(Base):
     profile_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     ban_reason: Mapped[str | None] = mapped_column(Text)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Lender/partner approval gate — set true after admin approves
+    partner_approved: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    partner_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Squad integration
     squad_account_id: Mapped[str | None] = mapped_column(String(100))  # from Squad response

@@ -14,12 +14,14 @@ import {
   PostGig,
   Payments,
   Settings,
+  Applicants,
   CompleteProfileLayout,
   Step1KYC,
   Step2Business,
   Step3Success,
 } from './features/trader';
 import { AjoTab } from './features/shared/AjoTab';
+import { ServicesTab } from './features/shared/ServicesTab';
 
 const DashboardRouter = () => {
   const { user } = useAuthStore();
@@ -52,6 +54,8 @@ function App() {
         <Route path="/dashboard/trader" element={<TraderLayout />}>
           <Route index element={<DashboardHome />} />
           <Route path="ajo" element={<AjoTab />} />
+          <Route path="services" element={<ServicesTab />} />
+          <Route path="applicants" element={<Applicants />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="pulse" element={<PulseScore />} />
           <Route path="gig/post" element={<PostGig />} />

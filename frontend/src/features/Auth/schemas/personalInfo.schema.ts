@@ -16,6 +16,14 @@ const passwordSchema = z
   .regex(/\d/, 'Password must contain at least one number')
   .regex(/[^a-zA-Z0-9]/, 'Password must contain at least one special character');
 
+const phoneSchema = z
+  .string()
+  .min(1, 'Phone number is required')
+  .regex(
+    /^(\+?234|0)\d{10}$/,
+    'Enter a valid Nigerian phone number (e.g. 08012345678 or +2348012345678)',
+  );
+
 export const personalInfoSchema = z
   .object({
     role: z.enum(['trader', 'job_seeker', 'partner'], {
@@ -27,6 +35,7 @@ export const personalInfoSchema = z
       .email('Please enter a valid email address'),
     password: passwordSchema,
     confirmPassword: z.string().min(1, 'Please confirm your password'),
+    phone: z.string().optional(),
     business_name: z.string().optional(),
     full_name: z.string().optional(),
     company_name: z.string().optional(),
@@ -46,6 +55,17 @@ export const personalInfoSchema = z
   .refine(
     (data) => data.role !== 'partner' || (data.company_name ?? '').trim() !== '',
     { message: 'Company name is required', path: ['company_name'] },
+  )
+  .refine(
+    (data) => {
+      if (data.role !== 'trader' && data.role !== 'job_seeker') return true;
+      return phoneSchema.safeParse(data.phone ?? '').success;
+    },
+    {
+      message:
+        'Enter a valid phone number (e.g. 08012345678 or +2348012345678)',
+      path: ['phone'],
+    },
   );
 
 export type PersonalInfoFormData = z.infer<typeof personalInfoSchema>;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { jobSeekerAPI } from '../../../lib/api';
+import { jobSeekerAPI, fetchUserProfile, type UserProfile } from '../../../lib/api';
 import type { JSTransaction } from '../../../lib/mockData';
+import { ComplaintModal } from '../../shared/ComplaintModal';
 
 const formatTime = (timestamp: string) => {
   const diff = Date.now() - new Date(timestamp).getTime();
@@ -21,17 +22,25 @@ export const JobSeekerTransactions: React.FC = () => {
   const [filter, setFilter] = useState<'all' | 'inflow' | 'outflow'>('all');
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
   const [copiedAcct, setCopiedAcct] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [vaBalance, setVaBalance] = useState(0);
+  const [complaintFor, setComplaintFor] = useState<JSTransaction | null>(null);
 
-  const vaNumber = '9013151600';
-  const vaBank = 'GTBank';
-  const vaBalance = 12400;
+  const vaNumber = profile?.squadVaNumber || '';
+  const vaBank = profile?.squadVaBank || '';
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await jobSeekerAPI.getTransactions(filter === 'all' ? undefined : filter);
+      const [data, prof, dash] = await Promise.all([
+        jobSeekerAPI.getTransactions(filter === 'all' ? undefined : filter),
+        fetchUserProfile(),
+        jobSeekerAPI.getDashboard().catch(() => null),
+      ]);
       setTransactions(data);
+      setProfile(prof);
+      if (dash) setVaBalance(Math.round((dash.squad_va_balance ?? 0) / 100));
     } catch {
       setError('Failed to load transactions');
     } finally {
@@ -133,12 +142,31 @@ export const JobSeekerTransactions: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <span className={`font-syne text-[16px] font-bold ${txn.type === 'inflow' ? 'text-[#1A6B4A]' : 'text-[#EF4444]'}`}>
-                {txn.type === 'inflow' ? '+' : '-'}₦{txn.amount.toLocaleString('en-NG')}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className={`font-syne text-[16px] font-bold ${txn.type === 'inflow' ? 'text-[#1A6B4A]' : 'text-[#EF4444]'}`}>
+                  {txn.type === 'inflow' ? '+' : '-'}₦{txn.amount.toLocaleString('en-NG')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setComplaintFor(txn)}
+                  title="Report an issue"
+                  aria-label="Report an issue"
+                  className="p-2 rounded-md text-zovu-text hover:text-[#F4A11D] hover:bg-zovu-surface-2/60 transition-colors"
+                >
+                  ⚠️
+                </button>
+              </div>
             </div>
           ))}
         </div>
+      )}
+
+      {complaintFor && (
+        <ComplaintModal
+          transactionId={complaintFor.id}
+          transactionLabel={`${complaintFor.counterparty} • ₦${complaintFor.amount.toLocaleString('en-NG')}`}
+          onClose={() => setComplaintFor(null)}
+        />
       )}
     </div>
   );

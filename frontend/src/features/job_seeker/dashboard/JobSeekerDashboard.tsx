@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useJobSeekerStore, useJobSeekerFeatureAccess } from '../../../stores/jobSeekerStore';
-import { jobSeekerAPI } from '../../../lib/api';
+import { jobSeekerAPI, fetchUserProfile, type UserProfile } from '../../../lib/api';
 import type { JobMatch, JSTransaction } from '../../../lib/mockData';
 
 const getTierColor = (tier: string) => {
@@ -53,6 +53,7 @@ export const JobSeekerDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<any>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [jobs, setJobs] = useState<JobMatch[]>([]);
   const [recentTxns, setRecentTxns] = useState<JSTransaction[]>([]);
   const [applying, setApplying] = useState<string | null>(null);
@@ -69,14 +70,16 @@ export const JobSeekerDashboard: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [dashRes, jobsRes, txnRes] = await Promise.all([
+      const [dashRes, jobsRes, txnRes, profRes] = await Promise.all([
         jobSeekerAPI.getDashboard(),
         jobSeekerAPI.getRecommendedJobs(),
         jobSeekerAPI.getTransactions(),
+        fetchUserProfile(),
       ]);
       setDashboard(dashRes);
       setJobs(jobsRes);
       setRecentTxns(txnRes.slice(0, 3));
+      setProfile(profRes);
     } catch {
       setError('Failed to load dashboard');
     } finally {
@@ -173,8 +176,15 @@ export const JobSeekerDashboard: React.FC = () => {
 
       {/* Greeting */}
       <div>
-        <h1 className="font-syne text-[28px] sm:text-[32px] font-bold text-zovu-text-light">Welcome back, Tobi 👋</h1>
-        <p className="font-dm text-[14px] text-zovu-text mt-1">Here's what's happening today</p>
+        <h1 className="font-syne text-[28px] sm:text-[32px] font-bold text-zovu-text-light">
+          Welcome back,{' '}
+          {(profile?.fullName?.trim() ||
+            `${profile?.firstName ?? ''} ${profile?.lastName ?? ''}`.trim() ||
+            profile?.email ||
+            'there').split(' ')[0]}{' '}
+          👋
+        </h1>
+        <p className="font-dm text-[14px] text-zovu-text mt-1">Here&apos;s what&apos;s happening today</p>
       </div>
 
       {/* Stats Row */}

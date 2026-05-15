@@ -4,7 +4,7 @@ import { Route, Navigate, Outlet, Link, useLocation, useNavigate } from 'react-r
 import { useAuthStore } from '../stores/authStore';
 import { useJobSeekerStore } from '../stores/jobSeekerStore';
 import { submitKYC } from '../lib/api';
-import { PartnersDashboard, PartnersSidebar } from '../features/partners/PartnersDashboard';
+import { PartnersDashboard, PartnersSidebar, PartnersMobileNav } from '../features/partners/PartnersDashboard';
 import { CustomerPool } from '../features/partners/CustomerPool';
 import { CustomerProfile } from '../features/partners/CustomerProfile';
 import { MyServices } from '../features/partners/MyServices';
@@ -31,8 +31,10 @@ import { JobSeekerGigHistory } from '../features/job_seeker/dashboard/JobSeekerG
 import { JobSeekerQRCheckin } from '../features/job_seeker/dashboard/JobSeekerQRCheckin';
 import { JobSeekerNotifications } from '../features/job_seeker/dashboard/JobSeekerNotifications';
 
-// Shared Ajo Tab
+// Shared
 import { AjoTab } from '../features/shared/AjoTab';
+import { ServicesTab } from '../features/shared/ServicesTab';
+import { LogoutButton } from '../features/shared/LogoutButton';
 
 // Admin Imports
 import { AdminGuard } from '../features/admin/AdminGuard';
@@ -44,6 +46,7 @@ import FraudManagement from '../features/admin/screens/FraudManagement';
 import MetricsDashboard from '../features/admin/screens/MetricsDashboard';
 import PartnershipManagement from '../features/admin/screens/PartnershipManagement';
 import AuditLog from '../features/admin/screens/AuditLog';
+import AjoManagement from '../features/admin/screens/AjoManagement';
 
 const PartnerProtectedRoute = () => {
   const { user } = useAuthStore();
@@ -60,9 +63,10 @@ const PartnerProtectedRoute = () => {
   return (
     <div className="flex bg-zovu-background min-h-screen">
       <PartnersSidebar />
-      <main className="flex-1 overflow-y-auto p-6 md:p-10">
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 pb-24 md:pb-10">
         <Outlet />
       </main>
+      <PartnersMobileNav />
     </div>
   );
 };
@@ -87,6 +91,7 @@ export const PartnerRoutes = (
 const jsNavItems = [
   { to: '/dashboard/job-seeker', label: 'Home', icon: '🏠' },
   { to: '/dashboard/job-seeker/jobs', label: 'Jobs', icon: '💼' },
+  { to: '/dashboard/job-seeker/services', label: 'Services', icon: '🛍️' },
   { to: '/dashboard/job-seeker/ajo', label: 'Ajo', icon: '🪙' },
   { to: '/dashboard/job-seeker/transactions', label: 'Transactions', icon: '💳' },
   { to: '/dashboard/job-seeker/pulse', label: 'Pulse Score', icon: '📊' },
@@ -99,7 +104,7 @@ const JobSeekerSidebar = () => {
   return (
     <div className="w-64 bg-[#161616] border-r border-[#2A2A2A] flex-col min-h-screen p-6 hidden md:flex">
       <h2 className="font-syne text-[24px] font-bold text-[#1A6B4A] mb-10">Zovu</h2>
-      <nav className="flex flex-col gap-1">
+      <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
         {jsNavItems.map(item => {
           const isActive = location.pathname === item.to || (item.to !== '/dashboard/job-seeker' && location.pathname.startsWith(item.to));
           return (
@@ -118,6 +123,9 @@ const JobSeekerSidebar = () => {
           );
         })}
       </nav>
+      <div className="pt-4 mt-4 border-t border-[#2A2A2A]">
+        <LogoutButton variant="sidebar" />
+      </div>
     </div>
   );
 };
@@ -125,14 +133,14 @@ const JobSeekerSidebar = () => {
 const JobSeekerBottomNav = () => {
   const location = useLocation();
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-[#161616] border-t border-[#2A2A2A] flex md:hidden justify-around items-center py-2 px-1 z-50">
+    <div className="fixed bottom-0 left-0 right-0 bg-[#161616] border-t border-[#2A2A2A] flex md:hidden overflow-x-auto no-scrollbar items-center py-2 px-1 z-50 gap-1">
       {jsNavItems.map(item => {
         const isActive = location.pathname === item.to || (item.to !== '/dashboard/job-seeker' && location.pathname.startsWith(item.to));
         return (
           <Link
             key={item.to}
             to={item.to}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-md transition-colors ${
+            className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-md transition-colors shrink-0 min-w-[64px] ${
               isActive ? 'text-[#1A6B4A]' : 'text-[#A0A0A0]'
             }`}
           >
@@ -141,6 +149,7 @@ const JobSeekerBottomNav = () => {
           </Link>
         );
       })}
+      <LogoutButton variant="bottom-bar" className="shrink-0 min-w-[64px]" />
     </div>
   );
 };
@@ -483,6 +492,7 @@ export const JobSeekerRoutes = (
     <Route element={<JobSeekerProtectedRoute />}>
       <Route path="/dashboard/job-seeker" element={<JobSeekerDashboard />} />
       <Route path="/dashboard/job-seeker/jobs" element={<JobSeekerJobs />} />
+      <Route path="/dashboard/job-seeker/services" element={<ServicesTab />} />
       <Route path="/dashboard/job-seeker/ajo" element={<AjoTab />} />
       <Route path="/dashboard/job-seeker/transactions" element={<JobSeekerTransactions />} />
       <Route path="/dashboard/job-seeker/pulse" element={<JobSeekerPulseScore />} />
@@ -527,6 +537,7 @@ export const AdminRoutes = (
     <Route path="/admin/fraud" element={<FraudManagement />} />
     <Route path="/admin/metrics" element={<MetricsDashboard />} />
     <Route path="/admin/partnerships" element={<PartnershipManagement />} />
+    <Route path="/admin/ajo" element={<AjoManagement />} />
     <Route path="/admin/audit" element={<AuditLog />} />
   </Route>
 );

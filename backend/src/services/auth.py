@@ -72,6 +72,7 @@ class AuthService:
         business_name: str | None,
         full_name: str | None,
         company_name: str | None,
+        phone: str | None = None,
     ) -> dict:
         """
         Step 2 of signup. Creates user, stores OTP in Redis, sends email.
@@ -122,6 +123,15 @@ class AuthService:
                 field="company_name",
             )
 
+        # Phone required for traders and job seekers (lenders can add via partner profile)
+        if role in ("trader", "job_seeker") and not (phone or "").strip():
+            raise ZovuAPIError(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                code="VALIDATION_ERROR",
+                message="phone number is required",
+                field="phone",
+            )
+
         # 4. Email uniqueness
         existing = await self.db.scalar(select(User).where(User.email == email))
         if existing:
@@ -132,7 +142,18 @@ class AuthService:
                 field="email",
             )
 
-        # 5. Create user
+        # 5. Create user. Phone is encrypted with Fernet (PII). If signup phone
+        #    is missing for lenders we store an empty placeholder; KYC will
+        #    overwrite it.
+        encrypted_phone = b""
+        if phone:
+            try:
+                from src.core.security import encrypt_pii
+                encrypted_phone = encrypt_pii(phone.strip())
+            except Exception as exc:
+                logger.warning("signup_phone_encrypt_failed", error=str(exc))
+                encrypted_phone = b""
+
         user = User(
             id=str(uuid.uuid4()),
             email=email,
@@ -145,7 +166,7 @@ class AuthService:
             business_name=business_name,
             full_name=full_name,
             company_name=company_name,
-            phone=b"",  # placeholder — filled during KYC
+            phone=encrypted_phone,
         )
         self.db.add(user)
         await self.db.commit()
@@ -168,11 +189,12 @@ class AuthService:
                 if admin_to:
                     html = (
                         "<html><body style='font-family:DM Sans,sans-serif;'>"
-                        f"<h2>New {role} signup</h2>"
+                        f"<h2>New {role} signup — awaiting your review</h2>"
                         f"<p><b>Email:</b> {email}</p>"
+                        f"<p><b>Phone:</b> {(phone or '—')}</p>"
                         f"<p><b>Company:</b> {company_name or '—'}</p>"
                         f"<p><b>User ID:</b> {user.id}</p>"
-                        "<p>Review them in the admin dashboard under Partnerships.</p>"
+                        "<p>Approve them in the admin dashboard under <b>Partnerships → Pending partners</b> to let them post services.</p>"
                         "</body></html>"
                     )
                     await svc._send(admin_to, f"[Zovu] New {role} signup — {company_name or email}", html)

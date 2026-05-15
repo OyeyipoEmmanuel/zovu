@@ -51,11 +51,15 @@ export interface UserProfile {
   email: string;
   role: 'trader' | 'job_seeker' | 'partner';
   businessName: string;
+  fullName: string;
+  companyName: string;
   profileCompletion: number;
   avatarUrl: string | null;
   kycComplete: boolean;
   squadVaNumber: string | null;
   squadVaBank: string | null;
+  partnerApproved: boolean;
+  pulseScore: number;
 }
 
 export interface JobMatch {
@@ -151,6 +155,7 @@ export interface AjoGroup {
   joined: boolean;
   total_contributed?: number;
   estimated_return?: number;
+  merchant_squad_account?: string | null;
 }
 
 export interface AjoTransaction {
@@ -257,6 +262,7 @@ interface AuthMeResponse {
   pulse_score?: number;
   kyc_verified?: boolean;
   profile_complete?: boolean;
+  partner_approved?: boolean;
 }
 
 interface CreditStatusResponse {
@@ -316,11 +322,15 @@ const mapMeToUserProfile = (me: AuthMeResponse): UserProfile => {
     email: me.email,
     role,
     businessName: (me.business_name || '').trim(),
+    fullName: (me.full_name || '').trim(),
+    companyName: (me.company_name || '').trim(),
     profileCompletion: completion,
     avatarUrl: null,
     kycComplete: kycDone,
     squadVaNumber: me.squad_account_number ?? null,
     squadVaBank: me.squad_account_bank ?? null,
+    partnerApproved: Boolean(me.partner_approved),
+    pulseScore: Number(me.pulse_score ?? 0),
   };
 };
 
@@ -479,6 +489,145 @@ export const postGig = async (
 export const fetchMyGigs = async (): Promise<Gig[]> => {
   const list = await v1OkData<Record<string, unknown>[]>('/gigs/my-gigs', { method: 'GET' });
   return Array.isArray(list) ? list.map(mapBackendGigToGig) : [];
+};
+
+// ─── Gig Applicants (Trader) ────────────────────────────────
+export interface GigApplicant {
+  id: string;            // application id
+  gig_id: string;
+  seeker_id: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  applied_at: string;
+  seeker: {
+    id: string;
+    display_name: string;
+    email: string;
+    pulse_score: number;
+    location: string;
+    skills: string[];
+    languages: string[];
+    completion_rate: number;
+    kyc_verified: boolean;
+    squad_account_number: string | null;
+    squad_account_bank: string | null;
+  };
+  gig?: {
+    id: string;
+    title: string;
+    location: string;
+    amount: number;
+    status: string;
+  };
+}
+
+export const fetchGigApplicants = async (gigId: string): Promise<GigApplicant[]> => {
+  const rows = await v1OkData<GigApplicant[]>(`/gigs/${gigId}/applicants`, { method: 'GET' });
+  return Array.isArray(rows) ? rows : [];
+};
+
+export const fetchAllMyApplicants = async (): Promise<GigApplicant[]> => {
+  const rows = await v1OkData<GigApplicant[]>('/gigs/my-applicants', { method: 'GET' });
+  return Array.isArray(rows) ? rows : [];
+};
+
+export const acceptApplicant = async (gigId: string, applicationId: string) =>
+  v1OkData<Record<string, unknown>>(`/gigs/${gigId}/accept/${applicationId}`, {
+    method: 'POST',
+    body: '{}',
+  });
+
+// ─── Squad / Payments ──────────────────────────────────────
+export const squadDeposit = async (amountNaira: number, callbackUrl: string) =>
+  v1OkData<{ transaction_id: string; squad_reference: string; checkout_url: string; amount_kobo: number; status: string }>(
+    '/transactions/squad/deposit',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        amount_kobo: Math.round(amountNaira * 100),
+        callback_url: callbackUrl,
+      }),
+    },
+  );
+
+export const squadPaySeeker = async (
+  seekerId: string,
+  amountNaira: number,
+  options?: { gig_id?: string; narration?: string },
+) =>
+  v1OkData<{
+    transaction_id: string;
+    squad_reference: string;
+    status: string;
+    amount_kobo: number;
+    seeker_id: string;
+    seeker_account: string;
+  }>('/transactions/squad/transfer-to-seeker', {
+    method: 'POST',
+    body: JSON.stringify({
+      seeker_id: seekerId,
+      amount_kobo: Math.round(amountNaira * 100),
+      gig_id: options?.gig_id,
+      narration: options?.narration,
+    }),
+  });
+
+// ─── Services Marketplace (approved partners only) ──────────
+export interface PartnerServiceListing {
+  id: string;
+  lender_id: string;
+  name: string;
+  type: 'loan' | 'insurance';
+  description: string | null;
+  min_pulse_score: number;
+  max_amount: number | null;       // kobo
+  interest_rate: number | null;
+  premium_amount: number | null;   // kobo
+  repayment_days: number | null;
+  status: string;
+  lender: { id: string; company_name: string; email: string };
+}
+
+export const fetchPartnerServicesMarketplace = async (
+  filters?: { type?: 'loan' | 'insurance'; minPulseScore?: number },
+): Promise<PartnerServiceListing[]> => {
+  const params = new URLSearchParams();
+  if (filters?.type) params.set('type', filters.type);
+  if (filters?.minPulseScore != null) params.set('min_pulse_score', String(filters.minPulseScore));
+  const q = params.toString();
+  const rows = await v1OkData<PartnerServiceListing[]>(`/lenders/services-marketplace${q ? `?${q}` : ''}`, {
+    method: 'GET',
+  });
+  return Array.isArray(rows) ? rows : [];
+};
+
+// ─── Complaints ────────────────────────────────────────────
+export interface ComplaintRecord {
+  id: string;
+  transaction_id: string;
+  category: string;
+  description: string;
+  status: string;
+  urgency: string;
+  resolution: string | null;
+  admin_notes: string | null;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export const fileComplaint = async (payload: {
+  transaction_id: string;
+  category: string;
+  description: string;
+  urgency?: 'low' | 'medium' | 'high';
+}): Promise<ComplaintRecord> =>
+  v1OkData<ComplaintRecord>('/admin/complaints', {
+    method: 'POST',
+    body: JSON.stringify({ urgency: 'medium', ...payload }),
+  });
+
+export const fetchMyComplaints = async (): Promise<ComplaintRecord[]> => {
+  const rows = await v1OkData<ComplaintRecord[]>('/admin/complaints/mine', { method: 'GET' });
+  return Array.isArray(rows) ? rows : [];
 };
 
 // ─── Payments ──────────────────────────────────────────────
@@ -1061,6 +1210,7 @@ export const ajoAPI = {
       joined: Boolean(r.joined),
       total_contributed: r.total_contributed != null ? Math.round(Number(r.total_contributed) / 100) : undefined,
       estimated_return: r.estimated_return != null ? Math.round(Number(r.estimated_return) / 100) : undefined,
+      merchant_squad_account: r.merchant_squad_account ? String(r.merchant_squad_account) : null,
     }));
   },
 

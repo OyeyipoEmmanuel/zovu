@@ -126,9 +126,55 @@ class GigService:
             from src.core.exceptions import ZovuAPIError
             raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Not your gig")
 
-        q = select(GigApplication).where(GigApplication.gig_id == gig_id)
+        q = select(GigApplication).where(GigApplication.gig_id == gig_id).order_by(desc(GigApplication.applied_at))
         result = await self.db.execute(q)
         return list(result.scalars().all())
+
+    async def list_applicants_with_seekers(self, trader: User, gig_id: str) -> list[dict]:
+        """Trader lists applicants enriched with seeker profile data."""
+        _require_trader(trader)
+        gig = await self.get_gig(gig_id)
+        if gig.trader_id != trader.id:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Not your gig")
+
+        q = (
+            select(GigApplication, User)
+            .join(User, User.id == GigApplication.seeker_id)
+            .where(GigApplication.gig_id == gig_id)
+            .order_by(desc(GigApplication.applied_at))
+        )
+        rows = (await self.db.execute(q)).all()
+        out: list[dict] = []
+        for app, seeker in rows:
+            display_name = (
+                (seeker.full_name or "").strip()
+                or f"{(seeker.first_name or '').strip()} {(seeker.last_name or '').strip()}".strip()
+                or seeker.email
+            )
+            skills = seeker.skills_list if isinstance(seeker.skills_list, list) else []
+            languages = seeker.languages_spoken if isinstance(seeker.languages_spoken, list) else []
+            out.append({
+                "id": app.id,
+                "gig_id": app.gig_id,
+                "seeker_id": app.seeker_id,
+                "status": app.status,
+                "applied_at": app.applied_at.isoformat() if app.applied_at else None,
+                "seeker": {
+                    "id": seeker.id,
+                    "display_name": display_name,
+                    "email": seeker.email,
+                    "pulse_score": int(getattr(seeker, "pulse_score", 0) or 0),
+                    "location": seeker.location or "",
+                    "skills": skills,
+                    "languages": languages,
+                    "completion_rate": float(getattr(seeker, "completion_rate", 0.0) or 0.0),
+                    "kyc_verified": bool(getattr(seeker, "kyc_verified", False)),
+                    "squad_account_number": seeker.squad_account_number,
+                    "squad_account_bank": seeker.squad_account_bank,
+                },
+            })
+        return out
 
     # ── Accept ───────────────────────────────────────────────────────────────
 

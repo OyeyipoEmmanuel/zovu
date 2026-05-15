@@ -26,6 +26,7 @@ export interface RegisterPayload {
   email: string;
   password: string;
   confirm_password: string;
+  phone?: string;
   business_name?: string;
   full_name?: string;
   company_name?: string;
@@ -87,7 +88,11 @@ const normalizeAuthResponse = (res: AuthResponse): AuthResponse => ({
 export const register = (payload: RegisterPayload) =>
   api.post<RegisterResponse>(
     '/auth/register',
-    { ...payload, role: toBackendRole(payload.role) },
+    {
+      ...payload,
+      role: toBackendRole(payload.role),
+      phone: payload.phone ? normalizePhone(payload.phone) : undefined,
+    },
     false,
   );
 

@@ -3,8 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { usePartnerStore } from '../../stores/partnerStore';
 import type { PartnerProduct } from '../../stores/partnerStore';
 import { useAuthStore } from '../../stores/authStore';
-import { lenderAPI, partnerAPI } from '../../lib/api';
+import { lenderAPI, partnerAPI, fetchUserProfile, type UserProfile } from '../../lib/api';
 import type { PartnerStats } from '../../lib/api';
+import { LogoutButton } from '../shared/LogoutButton';
 
 const getProductTypeBadge = (type: string) => {
   switch (type) {
@@ -19,13 +20,37 @@ export const PartnersSidebar: React.FC = () => {
   return (
     <div className="w-64 bg-zovu-surface-1 border-r border-zovu-border flex flex-col min-h-screen p-6 hidden md:flex">
       <h2 className="font-syne text-[24px] font-bold text-zovu-primary mb-10">Zovu</h2>
-      <nav className="flex flex-col gap-2">
+      <nav className="flex flex-col gap-2 flex-1 overflow-y-auto">
         <Link to="/dashboard/partners" className="py-3 px-4 rounded-[8px] hover:bg-zovu-surface-2 font-dm text-[14px] text-zovu-text-light transition-colors">Home</Link>
-        <Link to="/dashboard/partners/customers" className="py-3 px-4 rounded-[8px] hover:bg-zovu-surface-2 font-dm text-[14px] text-zovu-text-light transition-colors">Customer Pool</Link>
         <Link to="/dashboard/partners/services" className="py-3 px-4 rounded-[8px] hover:bg-zovu-surface-2 font-dm text-[14px] text-zovu-text-light transition-colors">My Services</Link>
-        <Link to="/dashboard/partners/products" className="py-3 px-4 rounded-[8px] hover:bg-zovu-surface-2 font-dm text-[14px] text-zovu-text-light transition-colors">Products</Link>
-        <Link to="/dashboard/partners/settings" className="py-3 px-4 rounded-[8px] hover:bg-zovu-surface-2 font-dm text-[14px] text-zovu-text-light transition-colors">Settings</Link>
+        <Link to="/dashboard/partners/customers" className="py-3 px-4 rounded-[8px] hover:bg-zovu-surface-2 font-dm text-[14px] text-zovu-text-light transition-colors">Customer Pool</Link>
       </nav>
+      <div className="pt-4 mt-4 border-t border-zovu-border">
+        <LogoutButton variant="sidebar" />
+      </div>
+    </div>
+  );
+};
+
+export const PartnersMobileNav: React.FC = () => {
+  const items = [
+    { to: '/dashboard/partners', label: 'Home', icon: '🏠' },
+    { to: '/dashboard/partners/services', label: 'Services', icon: '🛍️' },
+    { to: '/dashboard/partners/customers', label: 'Pool', icon: '👥' },
+  ];
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-zovu-surface-1 border-t border-zovu-border flex md:hidden overflow-x-auto no-scrollbar items-center py-2 px-1 z-50 gap-1">
+      {items.map((item) => (
+        <Link
+          key={item.to}
+          to={item.to}
+          className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-md text-zovu-text shrink-0 min-w-[72px]"
+        >
+          <span className="text-[18px]">{item.icon}</span>
+          <span className="font-dm text-[10px]">{item.label}</span>
+        </Link>
+      ))}
+      <LogoutButton variant="bottom-bar" className="shrink-0 min-w-[72px]" />
     </div>
   );
 };
@@ -38,6 +63,7 @@ export const PartnersDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [partnerStats, setPartnerStats] = useState<PartnerStats | null>(null);
   const [products, setLocalProducts] = useState<PartnerProduct[]>([]);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     const role = user?.role as string | undefined;
@@ -50,11 +76,14 @@ export const PartnersDashboard: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
+      const prof = await fetchUserProfile();
+      setProfile(prof);
+
       const [statsRes, borrowersRes, productsRes, pStatsRes] = await Promise.all([
-        lenderAPI.getStats(),
-        lenderAPI.getBorrowers({ limit: 3 }),
-        partnerAPI.getMyProducts(),
-        partnerAPI.getStats()
+        lenderAPI.getStats().catch(() => ({ total_funded: 0, active_loans: 0, repayment_rate: 0 })),
+        lenderAPI.getBorrowers({ limit: 3 }).catch(() => []),
+        partnerAPI.getMyProducts().catch(() => []),
+        partnerAPI.getStats().catch(() => ({ total_disbursed: 0, active_services: 0, customers_served: 0 })),
       ]);
       setStats(statsRes);
       setBorrowers(borrowersRes);
@@ -108,15 +137,33 @@ export const PartnersDashboard: React.FC = () => {
     );
   }
 
+  const displayName = profile?.companyName || profile?.fullName || profile?.email || 'partner';
+  const approved = Boolean(profile?.partnerApproved);
+
   return (
     <div className="flex flex-col gap-8">
       {/* Greeting */}
       <div>
         <h1 className="font-syne text-[24px] sm:text-[30px] font-bold text-zovu-text-light leading-tight">
-          Partners Dashboard
+          Welcome, {displayName}
         </h1>
         <p className="font-dm text-[14px] text-zovu-text mt-1">Overview of your services portfolio.</p>
       </div>
+
+      {!approved && (
+        <div className="bg-[#F4A11D]/10 border border-[#F4A11D]/30 rounded-[12px] p-4 flex items-center gap-3">
+          <span className="text-[22px]">⏳</span>
+          <div className="flex-1">
+            <p className="font-dm text-[14px] text-[#F4A11D] font-semibold">
+              Account pending admin approval
+            </p>
+            <p className="font-dm text-[12px] text-zovu-text mt-1">
+              You can browse your dashboard but cannot post loan or insurance services
+              until an admin approves your account. We&apos;ve already notified them.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

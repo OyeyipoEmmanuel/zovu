@@ -105,6 +105,33 @@ async def list_my_gigs(
     return {"ok": True, "data": [_serialize_gig(g) for g in gigs]}
 
 
+@router.get("/my-applicants", response_model=dict, summary="List applicants across all my gigs (trader)")
+async def list_my_applicants(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Aggregated applicant feed across every gig the authenticated trader posted."""
+    from src.services.GigService import _require_trader
+    _require_trader(user)
+    svc = GigService(db)
+    gigs = await svc.list_my_gigs(user)
+    out: list[dict] = []
+    for gig in gigs:
+        apps = await svc.list_applicants_with_seekers(user, gig.id)
+        for app in apps:
+            out.append({
+                **app,
+                "gig": {
+                    "id": gig.id,
+                    "title": gig.title,
+                    "location": gig.location,
+                    "amount": gig.amount,
+                    "status": gig.status,
+                },
+            })
+    return {"ok": True, "data": out}
+
+
 @router.get("/{gig_id}", response_model=dict, summary="Get gig by ID")
 async def get_gig(
     gig_id: str,
@@ -136,10 +163,10 @@ async def list_applicants(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Trader lists all applicants for their gig."""
+    """Trader lists all applicants for their gig (with seeker profile fields)."""
     svc = GigService(db)
-    apps = await svc.list_applicants(user, gig_id)
-    return {"ok": True, "data": [_serialize_application(a) for a in apps]}
+    apps = await svc.list_applicants_with_seekers(user, gig_id)
+    return {"ok": True, "data": apps}
 
 
 @router.post("/{gig_id}/accept/{application_id}", response_model=dict, summary="Accept applicant (trader)")

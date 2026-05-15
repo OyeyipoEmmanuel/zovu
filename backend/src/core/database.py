@@ -116,6 +116,15 @@ def _apply_schema_patches(connection):
     if "merchant_squad_account" not in existing_cols:
         patches.append("ALTER TABLE ajos ADD COLUMN merchant_squad_account VARCHAR(20) NULL")
 
+    if "users" in inspector.get_table_names():
+        user_cols = {col["name"] for col in inspector.get_columns("users")}
+        if "partner_approved" not in user_cols:
+            patches.append("ALTER TABLE users ADD COLUMN partner_approved BOOLEAN DEFAULT 0")
+        if "partner_approved_at" not in user_cols:
+            patches.append("ALTER TABLE users ADD COLUMN partner_approved_at TIMESTAMP NULL")
+        if "deleted_at" not in user_cols:
+            patches.append("ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP NULL")
+
     for sql in patches:
         try:
             connection.execute(text(sql))

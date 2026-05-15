@@ -1,14 +1,14 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminPartnershipsAPI } from '../../../services/adminApi';
+import { adminPartnershipsAPI, adminPartnerAPI } from '../../../services/adminApi';
 import AdminTable from '../components/AdminTable';
 import StatusBadge from '../components/StatusBadge';
 import ConfirmModal from '../components/ConfirmModal';
 
 const PartnershipManagement: React.FC = () => {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'requests' | 'active'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'pending_accounts' | 'active'>('pending_accounts');
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [rejectNotes, setRejectNotes] = useState('');
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
@@ -23,6 +23,19 @@ const PartnershipManagement: React.FC = () => {
     queryKey: ['admin-active-partnerships'],
     queryFn: () => adminPartnershipsAPI.listActive(),
     enabled: activeTab === 'active',
+  });
+
+  const { data: pendingPartnersData, isLoading: pendingPartnersLoading } = useQuery({
+    queryKey: ['admin-pending-partners'],
+    queryFn: () => adminPartnerAPI.listPending() as Promise<{ ok: boolean; data: any[] }>,
+    enabled: activeTab === 'pending_accounts',
+  });
+
+  const approvePartnerMutation = useMutation({
+    mutationFn: (userId: string) => adminPartnerAPI.approve(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-pending-partners'] });
+    },
   });
 
   const approveMutation = useMutation({
@@ -130,18 +143,29 @@ const PartnershipManagement: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-[#141414] border border-white/5 rounded-[12px] w-fit">
+      <div className="flex gap-1 p-1 bg-[#141414] border border-white/5 rounded-[12px] w-fit overflow-x-auto">
         <button
+          type="button"
+          onClick={() => setActiveTab('pending_accounts')}
+          className={`px-6 py-2 rounded-[8px] font-dm text-[14px] font-medium transition-all whitespace-nowrap ${
+            activeTab === 'pending_accounts' ? 'bg-[#1A6B4A] text-white' : 'text-[#A0A0A0] hover:text-white'
+          }`}
+        >
+          Pending Partners ({(pendingPartnersData as any)?.data?.length || 0})
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('requests')}
-          className={`px-6 py-2 rounded-[8px] font-dm text-[14px] font-medium transition-all ${
+          className={`px-6 py-2 rounded-[8px] font-dm text-[14px] font-medium transition-all whitespace-nowrap ${
             activeTab === 'requests' ? 'bg-[#1A6B4A] text-white' : 'text-[#A0A0A0] hover:text-white'
           }`}
         >
           New Requests ({((requestsData as any)?.data?.length) || 0})
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('active')}
-          className={`px-6 py-2 rounded-[8px] font-dm text-[14px] font-medium transition-all ${
+          className={`px-6 py-2 rounded-[8px] font-dm text-[14px] font-medium transition-all whitespace-nowrap ${
             activeTab === 'active' ? 'bg-[#1A6B4A] text-white' : 'text-[#A0A0A0] hover:text-white'
           }`}
         >
@@ -150,13 +174,22 @@ const PartnershipManagement: React.FC = () => {
       </div>
 
       <div className="bg-[#141414] border border-white/5 rounded-[16px] p-6">
-        {activeTab === 'requests' ? (
+        {activeTab === 'pending_accounts' && (
+          <PendingPartnersTable
+            data={(pendingPartnersData as any)?.data || []}
+            loading={pendingPartnersLoading}
+            onApprove={(id: string) => approvePartnerMutation.mutate(id)}
+            busy={approvePartnerMutation.isPending}
+          />
+        )}
+        {activeTab === 'requests' && (
           <AdminTable
             columns={requestColumns}
             data={(requestsData as any)?.data || []}
             isLoading={requestsLoading}
           />
-        ) : (
+        )}
+        {activeTab === 'active' && (
           <AdminTable
             columns={activeColumns}
             data={(activeData as any)?.data || []}
@@ -182,6 +215,74 @@ const PartnershipManagement: React.FC = () => {
           />
         </div>
       </ConfirmModal>
+    </div>
+  );
+};
+
+interface PendingPartner {
+  id: string;
+  email: string;
+  company_name: string | null;
+  full_name: string | null;
+  email_verified: boolean;
+  created_at: string;
+}
+
+const PendingPartnersTable: React.FC<{
+  data: PendingPartner[];
+  loading: boolean;
+  busy: boolean;
+  onApprove: (id: string) => void;
+}> = ({ data, loading, busy, onApprove }) => {
+  if (loading) {
+    return <p className="font-dm text-[14px] text-white/60">Loading pending partners…</p>;
+  }
+  if (!data || data.length === 0) {
+    return (
+      <p className="font-dm text-[14px] text-white/60 py-6 text-center">
+        No partners awaiting approval right now.
+      </p>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="text-[12px] uppercase tracking-wider text-white/40 border-b border-white/10">
+            <th className="py-3 px-2">Company</th>
+            <th className="py-3 px-2">Email</th>
+            <th className="py-3 px-2">Email verified</th>
+            <th className="py-3 px-2">Signed up</th>
+            <th className="py-3 px-2 text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((p) => (
+            <tr key={p.id} className="border-b border-white/5">
+              <td className="py-3 px-2 text-white font-dm text-[14px]">
+                {p.company_name || p.full_name || p.email}
+              </td>
+              <td className="py-3 px-2 text-white/70 font-dm text-[13px]">{p.email}</td>
+              <td className="py-3 px-2 text-white/70 font-dm text-[13px]">
+                {p.email_verified ? '✅' : '⌛'}
+              </td>
+              <td className="py-3 px-2 text-white/70 font-dm text-[13px]">
+                {new Date(p.created_at).toLocaleDateString('en-GB')}
+              </td>
+              <td className="py-3 px-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => onApprove(p.id)}
+                  disabled={busy}
+                  className="px-3 py-1 bg-[#1A6B4A]/10 text-[#1A6B4A] text-[12px] rounded-[4px] hover:bg-[#1A6B4A]/20 disabled:opacity-50"
+                >
+                  Approve
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 };

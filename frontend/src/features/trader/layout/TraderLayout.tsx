@@ -11,10 +11,15 @@ import {
   HiOutlineMenu,
   HiOutlineX,
   HiOutlineCurrencyDollar,
+  HiOutlineUserGroup,
+  HiOutlineShoppingBag,
 } from 'react-icons/hi';
+import { LogoutButton } from '../../shared/LogoutButton';
 
 const navItems = [
   { to: '/dashboard/trader', icon: HiOutlineHome, label: 'Home', end: true },
+  { to: '/dashboard/trader/applicants', icon: HiOutlineUserGroup, label: 'Applicants' },
+  { to: '/dashboard/trader/services', icon: HiOutlineShoppingBag, label: 'Services' },
   { to: '/dashboard/trader/ajo', icon: HiOutlineCurrencyDollar, label: 'Ajo' },
   { to: '/dashboard/trader/transactions', icon: HiOutlineSwitchHorizontal, label: 'Transactions' },
   { to: '/dashboard/trader/pulse', icon: HiOutlineChartBar, label: 'Pulse Score' },
@@ -28,11 +33,6 @@ const linkClass = ({ isActive }: { isActive: boolean }): string =>
     isActive
       ? 'bg-zovu-primary/10 text-zovu-primary font-medium'
       : 'text-zovu-text hover:text-zovu-text-light hover:bg-zovu-surface-2'
-  }`;
-
-const mobileLinkClass = ({ isActive }: { isActive: boolean }): string =>
-  `flex flex-col items-center gap-1 py-2 px-1 text-[10px] font-dm transition-all duration-200 ${
-    isActive ? 'text-zovu-primary font-medium' : 'text-zovu-text'
   }`;
 
 export const TraderLayout: React.FC = () => {
@@ -51,7 +51,7 @@ export const TraderLayout: React.FC = () => {
           <h2 className="font-syne text-[20px] font-bold text-zovu-text-light">Zovu</h2>
           <p className="font-dm text-[11px] text-zovu-text mt-0.5 uppercase tracking-wider">Trader Dashboard</p>
         </div>
-        <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
+        <nav className="flex-1 px-3 py-4 flex flex-col gap-1 overflow-y-auto">
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
               <item.icon size={20} />
@@ -59,8 +59,9 @@ export const TraderLayout: React.FC = () => {
             </NavLink>
           ))}
         </nav>
-        <div className="px-4 py-4 border-t border-zovu-border">
-          <p className="font-dm text-[11px] text-zovu-text/60">Powered by Squad</p>
+        <div className="px-3 py-3 border-t border-zovu-border flex flex-col gap-2">
+          <LogoutButton variant="sidebar" />
+          <p className="font-dm text-[11px] text-zovu-text/60 px-4">Powered by Squad</p>
         </div>
       </aside>
 
@@ -86,7 +87,7 @@ export const TraderLayout: React.FC = () => {
                 <HiOutlineX size={20} />
               </button>
             </div>
-            <nav className="flex-1 px-3 py-4 flex flex-col gap-1">
+            <nav className="flex-1 px-3 py-4 flex flex-col gap-1 overflow-y-auto">
               {navItems.map((item) => (
                 <NavLink key={item.to} to={item.to} end={item.end} className={linkClass}>
                   <item.icon size={20} />
@@ -94,6 +95,9 @@ export const TraderLayout: React.FC = () => {
                 </NavLink>
               ))}
             </nav>
+            <div className="px-3 py-3 border-t border-zovu-border">
+              <LogoutButton variant="sidebar" />
+            </div>
           </aside>
         </div>
       )}
@@ -109,7 +113,7 @@ export const TraderLayout: React.FC = () => {
             <HiOutlineMenu size={22} />
           </button>
           <h2 className="font-syne text-[16px] font-bold text-zovu-text-light">Zovu</h2>
-          <div className="w-8" />
+          <LogoutButton variant="icon" label="" />
         </header>
 
         <main className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 max-w-[1200px] mx-auto">
@@ -117,15 +121,25 @@ export const TraderLayout: React.FC = () => {
         </main>
       </div>
 
-      {/* Mobile Bottom Nav */}
+      {/* Mobile Bottom Nav (scrollable when items overflow) */}
       <nav className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-zovu-surface-1/95 backdrop-blur-md border-t border-zovu-border">
-        <div className="grid grid-cols-7 px-1 py-1">
+        <div className="flex overflow-x-auto no-scrollbar px-1 py-1 gap-1">
           {navItems.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className={mobileLinkClass}>
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-1 py-2 px-1 text-[10px] font-dm transition-all duration-200 shrink-0 min-w-[64px] ${
+                  isActive ? 'text-zovu-primary font-medium' : 'text-zovu-text'
+                }`
+              }
+            >
               <item.icon size={20} />
               <span>{item.label}</span>
             </NavLink>
           ))}
+          <LogoutButton variant="bottom-bar" className="shrink-0 min-w-[64px]" />
         </div>
       </nav>
     </div>

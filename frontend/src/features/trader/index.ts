@@ -6,6 +6,7 @@ export {
   PostGig,
   Payments,
   Settings,
+  Applicants,
   CompleteProfileLayout,
   Step1KYC,
   Step2Business,

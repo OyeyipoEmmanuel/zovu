@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   HiOutlineArrowDown,
   HiOutlineArrowUp,
+  HiOutlineExclamationCircle,
 } from 'react-icons/hi';
 import { SkeletonTransaction, ErrorCard } from '../components';
 import { fetchTransactions } from '../../../lib/api';
@@ -9,6 +10,7 @@ import { formatCurrency, formatRelativeTime } from '../../../lib/utils';
 import type { Transaction } from '../../../lib/mockData';
 import { useKYCGuard, KYCModal } from '../hooks';
 import { useNavigate } from 'react-router-dom';
+import { ComplaintModal } from '../../shared/ComplaintModal';
 
 type FilterTab = 'all' | 'inflow' | 'outflow';
 
@@ -19,6 +21,7 @@ export const Transactions: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [complaintFor, setComplaintFor] = useState<Transaction | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -126,11 +129,28 @@ export const Transactions: React.FC = () => {
                     <p className="font-dm text-[11px] text-zovu-text mt-0.5">{formatRelativeTime(txn.timestamp)}</p>
                     <p className="font-dm text-[10px] text-zovu-text/50 mt-0.5 font-mono">{txn.reference}</p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setComplaintFor(txn)}
+                    title="Report an issue with this transaction"
+                    aria-label="Report an issue with this transaction"
+                    className="p-2 text-zovu-text hover:text-[#F4A11D] transition-colors"
+                  >
+                    <HiOutlineExclamationCircle size={18} />
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {complaintFor && (
+        <ComplaintModal
+          transactionId={complaintFor.id}
+          transactionLabel={`${complaintFor.counterparty} • ${formatCurrency(complaintFor.amount)}`}
+          onClose={() => setComplaintFor(null)}
+        />
       )}
     </div>
   );
