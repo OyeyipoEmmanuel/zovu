@@ -6,8 +6,8 @@ import { useEffect } from 'react';
 const STEPS = [
   { id: 'skills', label: 'Step 1: Skills', path: '/dashboard/job-seeker/onboarding/skills' },
   { id: 'experience', label: 'Step 2: Experience', path: '/dashboard/job-seeker/onboarding/experience' },
-  { id: 'cv', label: 'Step 3: CV', path: '/dashboard/job-seeker/onboarding/cv' },
-  { id: 'preferences', label: 'Step 4: Preferences', path: '/dashboard/job-seeker/onboarding/preferences' },
+  // { id: 'cv', label: 'Step 3: CV', path: '/dashboard/job-seeker/onboarding/cv' },
+  { id: 'preferences', label: 'Step 3: Preferences', path: '/dashboard/job-seeker/onboarding/preferences' },
 ];
 
 export const JobSeekerOnboarding = () => {

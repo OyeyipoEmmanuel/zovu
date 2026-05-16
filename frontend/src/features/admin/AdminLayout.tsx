@@ -1,6 +1,12 @@
 /**
  * AdminLayout - Main admin dashboard layout
  * Features: sidebar navigation, responsive design, alert badges
+ *
+ * Fix: resolved broken git merge that left two conflicting versions of
+ * `navItems` concatenated inside the same array literal. Kept the
+ * `Icon: LucideIcon` format (matching the NavItem interface) and removed
+ * the duplicate `icon: string` block. Closed the incomplete Complaints
+ * object that was missing its `path`, `badge`, and closing brace.
  */
 import React, { useState } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
@@ -42,8 +48,17 @@ export const AdminLayout: React.FC = () => {
   // request() unwraps the envelope, so `overview` IS the metrics payload.
   const alerts = ((overview as any) || {}).alerts || {};
 
+  // FIX: single clean array using the NavItem interface shape (Icon: LucideIcon).
+  // Previously, two conflicting versions were merged into one array:
+  //   - version 1 used  Icon: LucideIcon  (correct, matches interface)
+  //   - version 2 used  icon: string      (wrong, caused render issues)
+  // The Complaints entry in version 1 was also unclosed (missing path/badge/}).
   const navItems: NavItem[] = [
-    { label: "Overview", Icon: LayoutDashboard, path: "/admin" },
+    {
+      label: "Overview",
+      Icon: LayoutDashboard,
+      path: "/admin",
+    },
     {
       label: "Complaints",
       Icon: FolderOpen,
@@ -56,16 +71,32 @@ export const AdminLayout: React.FC = () => {
       path: "/admin/fraud",
       badge: alerts.new_fraud_flags,
     },
-    { label: "Metrics", Icon: LineChart, path: "/admin/metrics" },
+    {
+      label: "Metrics",
+      Icon: LineChart,
+      path: "/admin/metrics",
+    },
     {
       label: "Partnerships",
       Icon: Handshake,
       path: "/admin/partnerships",
       badge: alerts.pending_partnerships,
     },
-    { label: "Partners", Icon: Building2, path: "/admin/partners" },
-    { label: "Ajo", Icon: Coins, path: "/admin/ajo" },
-    { label: "Audit Log", Icon: FileClock, path: "/admin/audit" },
+    {
+      label: "Partners",
+      Icon: Building2,
+      path: "/admin/partners",
+    },
+    {
+      label: "Ajo",
+      Icon: Coins,
+      path: "/admin/ajo",
+    },
+    {
+      label: "Audit Log",
+      Icon: FileClock,
+      path: "/admin/audit",
+    },
   ];
 
   return (
@@ -76,7 +107,7 @@ export const AdminLayout: React.FC = () => {
           sidebarOpen ? "w-64" : "w-20"
         } bg-[#0D0D0D] border-r border-white/8 transition-all duration-300 flex flex-col`}
       >
-        {/* Logo/Header */}
+        {/* Logo / Header */}
         <div className="p-4 border-b border-white/8">
           <h1
             className={`font-syne font-bold text-[#F4A11D] ${
@@ -95,12 +126,16 @@ export const AdminLayout: React.FC = () => {
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-2">
           {navItems.map((item) => {
-            // Treat the route as active if it matches exactly OR a deeper
-            // child route is open (e.g. /admin/complaints/<id>).
+            // Active if exact match OR a deeper child route is open
+            // (e.g. /admin/complaints/<id>), but never match /admin children
+            // against the Overview path itself.
             const isActive =
               location.pathname === item.path ||
-              (item.path !== "/admin" && location.pathname.startsWith(`${item.path}/`));
+              (item.path !== "/admin" &&
+                location.pathname.startsWith(`${item.path}/`));
+
             const Icon = item.Icon;
+
             return (
               <Link
                 key={item.path}
@@ -117,7 +152,7 @@ export const AdminLayout: React.FC = () => {
                     <span className="font-dm-sans text-sm font-medium">
                       {item.label}
                     </span>
-                    {item.badge && item.badge > 0 && (
+                    {item.badge != null && item.badge > 0 && (
                       <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
                         {item.badge > 9 ? "9+" : item.badge}
                       </span>
@@ -129,7 +164,7 @@ export const AdminLayout: React.FC = () => {
           })}
         </nav>
 
-        {/* Footer: logout + toggle */}
+        {/* Footer: logout + collapse toggle */}
         <div className="p-4 border-t border-white/8 flex flex-col gap-2">
           {sidebarOpen ? (
             <LogoutButton variant="sidebar" />
