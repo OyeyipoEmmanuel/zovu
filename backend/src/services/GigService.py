@@ -3,13 +3,19 @@ GigService — business logic for gig lifecycle.
 """
 import uuid
 import structlog
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, and_, or_
 
 from src.models.base import Gig, GigApplication, GigStatus, User, UserType
 
 logger = structlog.get_logger()
+
+WAITING_FOR_WORKER = "waiting_for_worker"
+WORKER_DONE = "worker_done"
+TRADER_CONFIRMED = "trader_confirmed"
+TRADER_DISPUTED = "trader_disputed"
+IN_DISPUTE = "in_dispute"
 
 
 class GigService:
@@ -112,9 +118,13 @@ class GigService:
             id=str(uuid.uuid4()),
             gig_id=gig_id,
             seeker_id=seeker.id,
-            status="pending",
+            status=WAITING_FOR_WORKER,
+            reserved_amount=gig.amount,
         )
         self.db.add(application)
+        gig.seeker_id = seeker.id
+        gig.status = GigStatus.IN_PROGRESS
+        gig.accepted_at = datetime.now(timezone.utc)
         await self.db.flush()
         return application
 
@@ -199,7 +209,8 @@ class GigService:
             from src.core.exceptions import ZovuAPIError
             raise ZovuAPIError(status_code=404, code="APPLICATION_NOT_FOUND", message="Application not found")
 
-        app.status = "accepted"
+        app.status = WAITING_FOR_WORKER
+        app.reserved_amount = gig.amount
         gig.seeker_id = app.seeker_id
         gig.status = GigStatus.IN_PROGRESS
         gig.accepted_at = datetime.now(timezone.utc)
@@ -213,6 +224,114 @@ class GigService:
 
         await self.db.flush()
         return gig
+
+    # ── Escrow state machine ───────────────────────────────────────────────
+
+    async def worker_done(self, seeker: User, application_id: str) -> GigApplication:
+        _require_seeker(seeker)
+        app, gig = await self._get_application_and_gig(application_id)
+        if app.seeker_id != seeker.id:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Not your application")
+        if app.status != WAITING_FOR_WORKER:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=400, code="INVALID_STATUS", message="Application is not waiting for worker")
+
+        now = datetime.now(timezone.utc)
+        app.status = WORKER_DONE
+        app.worker_done_at = now
+        app.confirmation_deadline_at = now + timedelta(hours=24)
+
+        try:
+            from src.workers.job_tasks import check_job_confirmation_deadline
+            task = check_job_confirmation_deadline.apply_async(
+                args=[app.id],
+                countdown=86400,
+                queue="default",
+            )
+            app.celery_deadline_task_id = task.id
+        except Exception as e:
+            logger.warning("job.deadline_task_failed", application_id=app.id, error=str(e))
+
+        await self._broadcast_job_event(gig.trader_id, "worker_done", app)
+        await self.db.flush()
+        return app
+
+    async def confirm_application(self, trader: User, application_id: str) -> GigApplication:
+        _require_trader(trader)
+        app, gig = await self._get_application_and_gig(application_id)
+        if gig.trader_id != trader.id:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Not your gig")
+        if app.status != WORKER_DONE:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=400, code="INVALID_STATUS", message="Application must be worker_done to confirm")
+
+        app.status = TRADER_CONFIRMED
+        gig.status = GigStatus.COMPLETED
+        gig.completed_at = datetime.now(timezone.utc)
+
+        if app.celery_deadline_task_id:
+            try:
+                from src.workers.celery_app import celery_app
+                celery_app.control.revoke(app.celery_deadline_task_id)
+            except Exception as e:
+                logger.warning("job.deadline_revoke_failed", application_id=app.id, error=str(e))
+
+        await self.db.flush()
+
+        try:
+            from src.workers.job_tasks import process_gig_payout
+            process_gig_payout.apply_async(args=[gig.id], queue="critical")
+        except Exception as e:
+            logger.warning("gig.payout_task_failed", gig_id=gig.id, error=str(e))
+
+        try:
+            from src.workers.credit_tasks import recalculate_pulse_score
+            recalculate_pulse_score.delay(gig.trader_id)
+            recalculate_pulse_score.delay(app.seeker_id)
+        except Exception as e:
+            logger.warning("gig.credit_recalc_dispatch_failed", gig_id=gig.id, error=str(e))
+
+        return app
+
+    async def dispute_application(self, trader: User, application_id: str) -> GigApplication:
+        _require_trader(trader)
+        app, gig = await self._get_application_and_gig(application_id)
+        if gig.trader_id != trader.id:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Not your gig")
+        if app.status != WORKER_DONE:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=400, code="INVALID_STATUS", message="Application must be worker_done to dispute")
+
+        app.status = TRADER_DISPUTED
+        await self.db.flush()
+        app.status = WAITING_FOR_WORKER
+        await self._broadcast_job_event(app.seeker_id, "trader_disputed", app)
+        await self.db.flush()
+        return app
+
+    async def _get_application_and_gig(self, application_id: str) -> tuple[GigApplication, Gig]:
+        q = (
+            select(GigApplication, Gig)
+            .join(Gig, Gig.id == GigApplication.gig_id)
+            .where(GigApplication.id == application_id)
+        )
+        row = (await self.db.execute(q)).one_or_none()
+        if not row:
+            from src.core.exceptions import ZovuAPIError
+            raise ZovuAPIError(status_code=404, code="APPLICATION_NOT_FOUND", message="Application not found")
+        return row[0], row[1]
+
+    async def _broadcast_job_event(self, user_id: str, event: str, app: GigApplication) -> None:
+        logger.info(
+            "jobs_realtime_event",
+            channel=f"jobs:{user_id}",
+            event_type=event,
+            application_id=app.id,
+            status=app.status,
+        )
 
     # ── Complete ─────────────────────────────────────────────────────────────
 

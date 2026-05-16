@@ -48,6 +48,10 @@ def _serialize_application(app) -> dict:
         "gig_id": app.gig_id,
         "seeker_id": app.seeker_id,
         "status": app.status,
+        "reserved_amount": app.reserved_amount,
+        "worker_done_at": app.worker_done_at.isoformat() if app.worker_done_at else None,
+        "confirmation_deadline_at": app.confirmation_deadline_at.isoformat() if app.confirmation_deadline_at else None,
+        "note": app.note,
         "applied_at": app.applied_at.isoformat() if app.applied_at else None,
     }
 
@@ -166,6 +170,16 @@ async def apply_to_gig(
     return {"ok": True, "data": _serialize_application(app)}
 
 
+@router.post("/listings/{gig_id}/apply", response_model=dict, summary="Apply to listing (seeker)")
+async def apply_to_listing(
+    gig_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Compatibility route for the escrow state-machine listing apply contract."""
+    return await apply_to_gig(gig_id=gig_id, db=db, user=user)
+
+
 @router.get("/{gig_id}/applicants", response_model=dict, summary="List applicants (trader)")
 async def list_applicants(
     gig_id: str,
@@ -206,3 +220,42 @@ async def complete_gig(
         gig = await svc.complete_gig(user, gig_id, payload.trader_rating)
     await db.commit()
     return {"ok": True, "data": _serialize_gig(gig)}
+
+
+@router.patch("/applications/{application_id}/worker-done", response_model=dict, summary="Worker marks job done")
+async def mark_worker_done(
+    application_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    svc = GigService(db)
+    async with db.begin_nested():
+        app = await svc.worker_done(user, application_id)
+    await db.commit()
+    return {"ok": True, "data": _serialize_application(app)}
+
+
+@router.patch("/applications/{application_id}/confirm", response_model=dict, summary="Trader confirms completed job")
+async def confirm_application(
+    application_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    svc = GigService(db)
+    async with db.begin_nested():
+        app = await svc.confirm_application(user, application_id)
+    await db.commit()
+    return {"ok": True, "data": _serialize_application(app)}
+
+
+@router.patch("/applications/{application_id}/dispute", response_model=dict, summary="Trader marks job incomplete")
+async def dispute_application(
+    application_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    svc = GigService(db)
+    async with db.begin_nested():
+        app = await svc.dispute_application(user, application_id)
+    await db.commit()
+    return {"ok": True, "data": _serialize_application(app)}

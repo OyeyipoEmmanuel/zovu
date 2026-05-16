@@ -68,6 +68,7 @@ celery_app.conf.task_routes = {
     "src.workers.squad_tasks.*": {"queue": "critical", "priority": 10},
     "src.workers.job_tasks.process_gig_payout": {"queue": "critical", "priority": 9},
     "src.workers.job_tasks.notify_matching_seekers": {"queue": "default", "priority": 5},
+    "src.workers.job_tasks.check_job_confirmation_deadline": {"queue": "default", "priority": 6},
     "src.workers.credit_tasks.*": {"queue": "default", "priority": 5},
     "src.workers.credit_tasks.update_activity_feed_cache": {"queue": "low", "priority": 1},
     "src.workers.embedding_tasks.*": {"queue": "low", "priority": 1},

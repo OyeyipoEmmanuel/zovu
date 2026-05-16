@@ -3,6 +3,7 @@ import { jobSeekerAPI, fetchUserProfile, type UserProfile } from '../../../lib/a
 import type { JSTransaction } from '../../../lib/mockData';
 import { ComplaintModal } from '../../shared/ComplaintModal';
 import { TransactionDetailModal } from '../../shared/TransactionDetailModal';
+import { DepositModal } from '../../shared/DepositModal';
 import { AlertTriangle, ArrowDown, ArrowUp, Copy, Check } from 'lucide-react';
 
 const formatTime = (timestamp: string) => {
@@ -28,6 +29,7 @@ export const JobSeekerTransactions: React.FC = () => {
   const [vaBalance, setVaBalance] = useState(0);
   const [complaintFor, setComplaintFor] = useState<JSTransaction | null>(null);
   const [detailTxId, setDetailTxId] = useState<string | null>(null);
+  const [showDepositModal, setShowDepositModal] = useState(false);
 
   const vaNumber = profile?.squadVaNumber || '';
   const vaBank = profile?.squadVaBank || '';
@@ -69,9 +71,18 @@ export const JobSeekerTransactions: React.FC = () => {
     <div className="max-w-4xl mx-auto w-full flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="font-syne text-[28px] font-bold text-zovu-text-light">Transactions</h1>
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-[#1A6B4A] animate-pulse" />
-          <span className="font-dm text-[12px] text-[#1A6B4A] font-medium">Live</span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowDepositModal(true)}
+            className="rounded-[8px] bg-[#1A6B4A] px-4 py-2 font-dm text-[13px] font-bold text-white hover:brightness-110"
+          >
+            Deposit
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-[#1A6B4A] animate-pulse" />
+            <span className="font-dm text-[12px] text-[#1A6B4A] font-medium">Live</span>
+          </div>
         </div>
       </div>
 
@@ -219,6 +230,13 @@ export const JobSeekerTransactions: React.FC = () => {
         <TransactionDetailModal
           transactionId={detailTxId}
           onClose={() => setDetailTxId(null)}
+        />
+      )}
+
+      {showDepositModal && profile?.id && (
+        <DepositModal
+          userId={profile.id}
+          onClose={() => setShowDepositModal(false)}
         />
       )}
     </div>

@@ -193,8 +193,10 @@ def create_app() -> FastAPI:
     # Include routers
     from src.routers import (
         auth_router,
+        users_router,
         credit_router,
         gigs_router,
+        applications_router,
         lenders_router,
         job_seekers_router,
         loans_router,
@@ -207,8 +209,10 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
+    app.include_router(users_router, prefix="/api/v1")
     app.include_router(credit_router, prefix="/api/v1")
     app.include_router(gigs_router, prefix="/api/v1")
+    app.include_router(applications_router, prefix="/api/v1")
     app.include_router(lenders_router, prefix="/api/v1")
     app.include_router(job_seekers_router, prefix="/api/v1")
     app.include_router(loans_router, prefix="/api/v1/loans", tags=["Loans"])

@@ -132,6 +132,19 @@ def _apply_schema_patches(connection):
         if "scheduled_at" not in gig_cols:
             patches.append("ALTER TABLE gigs ADD COLUMN scheduled_at TIMESTAMP NULL")
 
+    if "gig_applications" in inspector.get_table_names():
+        application_cols = {col["name"] for col in inspector.get_columns("gig_applications")}
+        if "reserved_amount" not in application_cols:
+            patches.append("ALTER TABLE gig_applications ADD COLUMN reserved_amount INTEGER NULL")
+        if "worker_done_at" not in application_cols:
+            patches.append("ALTER TABLE gig_applications ADD COLUMN worker_done_at TIMESTAMP NULL")
+        if "confirmation_deadline_at" not in application_cols:
+            patches.append("ALTER TABLE gig_applications ADD COLUMN confirmation_deadline_at TIMESTAMP NULL")
+        if "celery_deadline_task_id" not in application_cols:
+            patches.append("ALTER TABLE gig_applications ADD COLUMN celery_deadline_task_id VARCHAR(255) NULL")
+        if "note" not in application_cols:
+            patches.append("ALTER TABLE gig_applications ADD COLUMN note TEXT NULL")
+
     if "ajo_transactions" in inspector.get_table_names():
         ajo_tx_cols = {col["name"] for col in inspector.get_columns("ajo_transactions")}
         if "paid_at" not in ajo_tx_cols:

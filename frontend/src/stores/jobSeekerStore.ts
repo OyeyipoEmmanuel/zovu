@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { JobMatch, GigRecord, JSTransaction, JSNotification } from '../lib/mockData'
 
 export interface WorkHistoryItem {
@@ -68,7 +69,9 @@ interface JobSeekerStore {
   setRedirectReason: (reason: string | null) => void
 }
 
-export const useJobSeekerStore = create<JobSeekerStore>((set) => ({
+export const useJobSeekerStore = create<JobSeekerStore>()(
+  persist(
+    (set) => ({
   // Onboarding
   jobSeekerOnboardingComplete: false,
   currentOnboardingStep: 'skills',
@@ -125,10 +128,18 @@ export const useJobSeekerStore = create<JobSeekerStore>((set) => ({
   setSquadVaNumber: (num) => set({ squadVaNumber: num }),
   setSquadVaBalance: (bal) => set({ squadVaBalance: bal }),
   addAppliedJob: (jobId) => set((state) => ({
-    appliedJobs: [...state.appliedJobs, jobId],
+    appliedJobs: state.appliedJobs.includes(jobId)
+      ? state.appliedJobs
+      : [...state.appliedJobs, jobId],
   })),
   setRedirectReason: (reason) => set({ redirectReason: reason }),
-}))
+}),
+    {
+      name: 'job-seeker-store',
+      partialize: (state) => ({ appliedJobs: state.appliedJobs }),
+    },
+  ),
+)
 
 // ─── Feature Access Hook ─────────────────────────────────────
 

@@ -95,7 +95,11 @@ export const JobSeekerDashboard: React.FC = () => {
     try {
       await jobSeekerAPI.applyForJob(jobId);
       addAppliedJob(jobId);
-    } catch { /* silent */ }
+    } catch (error: any) {
+      if (error?.response?.status === 409) {
+        addAppliedJob(jobId);
+      }
+    }
     finally { setApplying(null); }
   };
 
@@ -239,6 +243,10 @@ export const JobSeekerDashboard: React.FC = () => {
                   <button
                     onClick={() => handleApply(job.id)}
                     disabled={applied || applying === job.id}
+                    style={{
+                      opacity: applied ? 0.6 : 1,
+                      cursor: applied ? 'not-allowed' : 'pointer',
+                    }}
                     className={`px-5 py-2 rounded-[8px] font-dm text-[13px] font-bold transition-all ${
                       applied
                         ? 'bg-zovu-surface-2 text-zovu-text cursor-default'

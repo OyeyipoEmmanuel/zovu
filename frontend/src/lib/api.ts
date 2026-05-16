@@ -59,6 +59,13 @@ export interface VirtualAccount {
   balance: number;
 }
 
+export interface VaDepositDetails {
+  account_number: string;
+  bank_name: string;
+  account_name: string;
+  payment_reference: string;
+}
+
 export interface UserProfile {
   id?: string;
   firstName: string;
@@ -478,6 +485,9 @@ export const fetchVirtualAccount = async (): Promise<VirtualAccount> => {
     balance: Math.round((credit.total_balance ?? 0) / 100),
   };
 };
+
+export const fetchVaDepositDetails = async (userId: string): Promise<VaDepositDetails> =>
+  v1OkData<VaDepositDetails>(`/users/${userId}/va-details`, { method: 'GET' });
 
 // ─── Transactions ──────────────────────────────────────────
 export const fetchTransactions = async (

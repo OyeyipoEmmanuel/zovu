@@ -18,11 +18,13 @@ import { formatCurrency, formatRelativeTime, getGreeting, copyToClipboard } from
 import type { Transaction } from '../../../lib/mockData';
 import { useKYCGuard, KYCModal } from '../hooks';
 import { LoanFlowModal } from './LoanFlowModal';
+import { DepositModal } from '../../shared/DepositModal';
 
 export const DashboardHome: React.FC = () => {
   const { kycComplete } = useKYCGuard();
   const [showKYCModal, setShowKYCModal] = useState(false);
   const [showLoanModal, setShowLoanModal] = useState(false);
+  const [showDepositModal, setShowDepositModal] = useState(false);
 
   const setUser = useAuthStore((s) => s.setUser);
   const setAccount = useTraderStore((s) => s.setAccount);
@@ -42,6 +44,7 @@ export const DashboardHome: React.FC = () => {
   const [profileCompletion, setProfileCompletion] = useState(60);
   const [activeGigCount, setActiveGigCount] = useState(0);
   const [userName, setUserName] = useState('');
+  const [userId, setUserId] = useState('');
   const didLoad = useRef(false);
 
   const loadData = async (): Promise<void> => {
@@ -74,6 +77,7 @@ export const DashboardHome: React.FC = () => {
       setRecentTxns(txnRes.data.slice(0, 5));
       setProfileCompletion(profile.profileCompletion);
       setActiveGigCount(gigs.filter((g) => g.status === 'active').length);
+      setUserId(profile.id ?? '');
       const greeting =
         profile.role === 'trader' && profile.businessName?.trim()
           ? profile.businessName.trim()
@@ -121,6 +125,7 @@ export const DashboardHome: React.FC = () => {
     <div className="flex flex-col gap-6">
       {showKYCModal && <KYCModal onCancel={() => setShowKYCModal(false)} />}
       {showLoanModal && <LoanFlowModal onCancel={() => setShowLoanModal(false)} />}
+      {showDepositModal && userId && <DepositModal userId={userId} onClose={() => setShowDepositModal(false)} />}
       
       {/* Greeting */}
       <div>
@@ -151,6 +156,13 @@ export const DashboardHome: React.FC = () => {
             >
               <HiOutlineClipboardCopy size={14} />
               {copied ? 'Copied!' : 'Copy'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDepositModal(true)}
+              className="flex items-center gap-1 px-3 py-1 rounded-[6px] bg-zovu-primary text-white text-[12px] font-dm font-semibold hover:brightness-110 transition-all duration-200"
+            >
+              Fund Wallet
             </button>
           </div>
         </div>

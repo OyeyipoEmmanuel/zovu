@@ -532,6 +532,25 @@ class GigApplication(Base):
     )
 
 
+class SupportTicket(Base):
+    """Support queue item for job escrow timeouts and manual resolutions."""
+    __tablename__ = "support_tickets"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    reference_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="open", server_default="open", nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_support_tickets_type", "type"),
+        Index("ix_support_tickets_reference_id", "reference_id"),
+        Index("ix_support_tickets_status", "status"),
+    )
+
+
 class LenderUnlock(Base):
     """Tracks when a lender has unlocked a borrower's full profile."""
     __tablename__ = "lender_unlocks"
