@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from pydantic import BaseModel
 import httpx
 
@@ -63,14 +63,21 @@ def _ajo_squad_merchant_account() -> str | None:
 
 
 def _serialize_ajo(ajo: Ajo, member_count: int = 0, joined: bool = False,
-                    total_contributed_kobo: int = 0, estimated_return_kobo: int | None = None) -> dict:
+                    total_contributed_kobo: int = 0, estimated_return_kobo: int | None = None,
+                    total_pool_kobo: int | None = None, my_total_kobo: int | None = None) -> dict:
+    # total_pool / my_total are computed fresh from ajo_transactions (see
+    # get_ajo). total_balance is kept for backwards compatibility but should
+    # be considered a cached aggregate, not the source of truth.
     return {
         "id": ajo.id,
         "name": ajo.name,
         "description": ajo.description,
         "minimum_deposit": int(ajo.contribution_amount or 0),
         "end_date": ajo.end_date.isoformat() if ajo.end_date else None,
+        "next_payout_date": (ajo.next_due_date.isoformat() if ajo.next_due_date else (ajo.end_date.isoformat() if ajo.end_date else None)),
         "total_balance": int(ajo.total_balance or 0),
+        "total_pool": int(total_pool_kobo if total_pool_kobo is not None else (ajo.total_balance or 0)),
+        "my_total": int(my_total_kobo or 0),
         "member_count": member_count,
         "max_members": ajo.max_members,
         "status": ajo.status,
@@ -90,7 +97,11 @@ async def list_groups(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List active Ajo groups with a `joined` flag for this user."""
+    """List active Ajo groups with a `joined` flag for this user.
+
+    Each row includes fresh `total_pool` / `my_total` computed from
+    `ajo_transactions` (never cached).
+    """
     rows = (await db.execute(select(Ajo).where(Ajo.status == AjoStatus.ACTIVE).order_by(Ajo.created_at.desc()))).scalars().all()
 
     out = []
@@ -103,19 +114,45 @@ async def list_groups(
         )).scalar_one_or_none()
 
         total_contributed = int(membership.total_contributed) if membership else 0
+
+        totals_row = (await db.execute(
+            select(
+                func.coalesce(func.sum(AjoTransaction.amount), 0).label("total_pool"),
+                func.coalesce(
+                    func.sum(
+                        case((AjoTransaction.user_id == user.id, AjoTransaction.amount), else_=0)
+                    ),
+                    0,
+                ).label("my_total"),
+            ).where(
+                AjoTransaction.ajo_id == ajo.id,
+                AjoTransaction.type == "contribution",
+                AjoTransaction.status == "completed",
+            )
+        )).one()
+        total_pool = int(totals_row.total_pool or 0)
+        my_total = int(totals_row.my_total or 0)
+
         # SQLite strips tzinfo on round-trip, so naive end_dates need to be
         # treated as UTC before comparing against aware now().
         end_date = ajo.end_date
         if end_date is not None and end_date.tzinfo is None:
             end_date = end_date.replace(tzinfo=timezone.utc)
         # Estimate of returns = total contributions / member_count when group ends.
-        # If the user contributes consistently, they will receive a share of total_balance.
+        # If the user contributes consistently, they will receive a share of total_pool.
         if member_count > 0 and end_date and end_date > datetime.now(timezone.utc):
-            estimated = int((ajo.total_balance or 0) / max(1, member_count))
+            estimated = int(total_pool / max(1, member_count))
         else:
             estimated = total_contributed
-        out.append(_serialize_ajo(ajo, member_count=member_count, joined=membership is not None,
-                                   total_contributed_kobo=total_contributed, estimated_return_kobo=estimated))
+        out.append(_serialize_ajo(
+            ajo,
+            member_count=member_count,
+            joined=membership is not None,
+            total_contributed_kobo=total_contributed,
+            estimated_return_kobo=estimated,
+            total_pool_kobo=total_pool,
+            my_total_kobo=my_total,
+        ))
     return {"ok": True, "data": out}
 
 
@@ -330,6 +367,14 @@ async def get_ajo(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """
+    Returns the group with fresh totals computed from `ajo_transactions`.
+
+    `total_pool` and `my_total` are computed in a single SQL query using
+    conditional aggregation (FILTER … or CASE under SQLite) and only count
+    `completed` contributions — pending or failed Squad rows don't count.
+    These values are never cached.
+    """
     ajo = await db.get(Ajo, ajo_id)
     if not ajo:
         raise ZovuAPIError(status_code=404, code="AJO_NOT_FOUND", message="Ajo group not found")
@@ -337,10 +382,35 @@ async def get_ajo(
     members = (await db.execute(select(AjoMembership).where(AjoMembership.ajo_id == ajo_id))).scalars().all()
     membership = next((m for m in members if m.user_id == user.id), None)
     total_contributed = int(membership.total_contributed) if membership else 0
+
+    # Single-query conditional aggregation: total of all completed contributions
+    # for the group + just this user's portion. CASE WHEN works on both
+    # Postgres and SQLite (FILTER is Postgres-only).
+    totals_row = (await db.execute(
+        select(
+            func.coalesce(func.sum(AjoTransaction.amount), 0).label("total_pool"),
+            func.coalesce(
+                func.sum(
+                    case((AjoTransaction.user_id == user.id, AjoTransaction.amount), else_=0)
+                ),
+                0,
+            ).label("my_total"),
+        ).where(
+            AjoTransaction.ajo_id == ajo_id,
+            AjoTransaction.type == "contribution",
+            AjoTransaction.status == "completed",
+        )
+    )).one()
+
+    total_pool = int(totals_row.total_pool or 0)
+    my_total = int(totals_row.my_total or 0)
+
     return {"ok": True, "data": _serialize_ajo(
         ajo,
         member_count=len(members),
         joined=membership is not None,
         total_contributed_kobo=total_contributed,
-        estimated_return_kobo=int((ajo.total_balance or 0) / max(1, len(members))) if members else 0,
+        estimated_return_kobo=int(total_pool / max(1, len(members))) if members else 0,
+        total_pool_kobo=total_pool,
+        my_total_kobo=my_total,
     )}

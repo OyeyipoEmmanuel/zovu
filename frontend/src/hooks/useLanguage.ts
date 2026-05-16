@@ -20,13 +20,13 @@ const triggerGoogleTranslate = (code: string) => {
   if (!select) return
 
   if (code === 'en') {
-    // Reset to English
+    // Reset to English by clearing the widget value + cookie.
+    // NOTE: Do NOT call window.location.reload() here — it wipes in-memory
+    // auth state (the user object) and forces a logout. The cookie reset
+    // + change event is enough for Google Translate to revert.
     select.value = ''
     select.dispatchEvent(new Event('change'))
-
-    // Also clear the cookie and reload to fully restore English
     setGoogleTranslateCookie('en')
-    setTimeout(() => window.location.reload(), 300)
     return
   }
 

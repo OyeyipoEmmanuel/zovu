@@ -73,3 +73,54 @@ iframe {
     @apply font-syne text-zovu-text-light;
   }
 }
+
+/* ── Print: thermal-receipt layout ───────────────────────────
+   `.print-only` content is invisible on screen but the only thing rendered
+   when window.print() fires. `.no-print` is honoured as an explicit hide
+   marker for inline use. */
+.print-only {
+  display: none;
+}
+
+@media print {
+  /* Force a clean white canvas regardless of the dark app theme. */
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  /* Hide everything in the document, then surface only the receipt tree.
+     visibility (rather than display:none) keeps the receipt's ancestors
+     paintable without forcing a re-layout. */
+  body * {
+    visibility: hidden;
+  }
+  .no-print,
+  .no-print * {
+    display: none !important;
+  }
+  .print-only,
+  .print-only * {
+    visibility: visible !important;
+  }
+  .print-only {
+    display: block !important;
+    position: absolute;
+    inset: 0;
+    margin: 0 auto;
+    padding: 12px;
+    max-width: 320px;
+    color: #000 !important;
+    background: #fff !important;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .print-only * {
+    color: #000 !important;
+    background: transparent !important;
+    font-family: 'Courier New', Courier, monospace !important;
+  }
+}

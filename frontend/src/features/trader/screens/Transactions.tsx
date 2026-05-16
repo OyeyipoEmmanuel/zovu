@@ -11,6 +11,7 @@ import type { Transaction } from '../../../lib/mockData';
 import { useKYCGuard, KYCModal } from '../hooks';
 import { useNavigate } from 'react-router-dom';
 import { ComplaintModal } from '../../shared/ComplaintModal';
+import { TransactionDetailModal } from '../../shared/TransactionDetailModal';
 
 type FilterTab = 'all' | 'inflow' | 'outflow';
 
@@ -22,6 +23,7 @@ export const Transactions: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [complaintFor, setComplaintFor] = useState<Transaction | null>(null);
+  const [detailTxId, setDetailTxId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -111,7 +113,8 @@ export const Transactions: React.FC = () => {
                 return (
                   <div
                     key={txn.id}
-                    className="flex items-center gap-3 px-5 py-4 hover:bg-zovu-surface-2/50 transition-colors duration-150"
+                    onClick={() => setDetailTxId(txn.id)}
+                    className="flex items-center gap-3 px-5 py-4 hover:bg-zovu-surface-2/50 transition-colors duration-150 cursor-pointer"
                   >
                     <div
                       className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
@@ -145,7 +148,10 @@ export const Transactions: React.FC = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setComplaintFor(txn)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setComplaintFor(txn);
+                      }}
                       title="Report an issue with this transaction"
                       aria-label="Report an issue with this transaction"
                       className="p-2 text-zovu-text hover:text-[#F4A11D] transition-colors"
@@ -165,6 +171,13 @@ export const Transactions: React.FC = () => {
           transactionId={complaintFor.id}
           transactionLabel={`${complaintFor.counterparty} • ${formatCurrency(complaintFor.amount)}`}
           onClose={() => setComplaintFor(null)}
+        />
+      )}
+
+      {detailTxId && (
+        <TransactionDetailModal
+          transactionId={detailTxId}
+          onClose={() => setDetailTxId(null)}
         />
       )}
     </div>

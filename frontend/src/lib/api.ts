@@ -176,6 +176,12 @@ export interface AjoGroup {
   description: string | null;
   minimum_deposit: number;
   end_date: string | null;
+  /** ISO date of the next payout (admin-set next_due_date, else end_date). */
+  next_payout_date: string | null;
+  /** Fresh group pool total computed from ajo_transactions (naira). */
+  total_pool: number;
+  /** Sum of this user's completed contributions for this group (naira). */
+  my_total: number;
   total_balance: number;
   member_count: number;
   status: string;
@@ -480,8 +486,9 @@ export const fetchTransactions = async (
   limit = 15,
   cursor?: string | null
 ): Promise<{ data: Transaction[]; total: number; cursor?: string | null; has_more?: boolean }> => {
-  const fetchLimit = filter === 'all' ? limit : Math.min(100, limit * 5);
-  const qs = new URLSearchParams({ limit: String(fetchLimit) });
+  // Server-side filtering — the backend honours `type=inflow|outflow` and
+  // returns only rows where the viewer is on the matching side.
+  const qs = new URLSearchParams({ limit: String(limit), type: filter });
   if (cursor) qs.set('cursor', cursor);
   const res = await rawV1<{
     items: TxnListItem[];
@@ -489,15 +496,32 @@ export const fetchTransactions = async (
     cursor: string | null;
     has_more: boolean;
   }>(`/transactions?${qs.toString()}`, { method: 'GET' });
-  let rows = (res.items || []).map(mapTxnRow);
-  if (filter !== 'all') rows = rows.filter((t) => t.type === filter);
-  rows = rows.slice(0, limit);
+  const rows = (res.items || []).map(mapTxnRow);
   return {
     data: rows,
     total: rows.length,
     cursor: res.cursor ?? null,
     has_more: Boolean(res.has_more),
   };
+};
+
+export interface TransactionDetail {
+  id: string;
+  squad_transaction_id: string | null;
+  type: string;
+  type_label: string;
+  amount: number;        // kobo
+  amount_naira: number;  // naira (float)
+  counterparty: string;
+  direction: 'inflow' | 'outflow';
+  description: string;
+  status: string;
+  created_at: string;
+  reference: string;
+}
+
+export const fetchTransactionDetail = async (txId: string): Promise<TransactionDetail> => {
+  return await rawV1<TransactionDetail>(`/transactions/${encodeURIComponent(txId)}/detail`, { method: 'GET' });
 };
 
 // ─── Pulse Score ───────────────────────────────────────────
@@ -1337,20 +1361,30 @@ export const jobSeekerAPI = {
 export const ajoAPI = {
   listGroups: async (): Promise<AjoGroup[]> => {
     const rows = await v1OkData<Record<string, unknown>[]>('/ajo/groups', { method: 'GET' }).catch(() => []);
-    return (Array.isArray(rows) ? rows : []).map((r) => ({
-      id: String(r.id),
-      name: String(r.name),
-      description: r.description ? String(r.description) : null,
-      minimum_deposit: Math.round(Number(r.minimum_deposit ?? r.contribution_amount ?? 0) / 100),
-      end_date: r.end_date ? String(r.end_date) : null,
-      total_balance: Math.round(Number(r.total_balance ?? 0) / 100),
-      member_count: Number(r.member_count ?? 0),
-      status: String(r.status || 'active'),
-      joined: Boolean(r.joined),
-      total_contributed: r.total_contributed != null ? Math.round(Number(r.total_contributed) / 100) : undefined,
-      estimated_return: r.estimated_return != null ? Math.round(Number(r.estimated_return) / 100) : undefined,
-      merchant_squad_account: r.merchant_squad_account ? String(r.merchant_squad_account) : null,
-    }));
+    return (Array.isArray(rows) ? rows : []).map((r) => {
+      // Prefer the fresh total_pool / my_total from the backend; fall back to
+      // the older total_balance / total_contributed shape for safety during
+      // rollout.
+      const totalPoolKobo = Number(r.total_pool ?? r.total_balance ?? 0);
+      const myTotalKobo = Number(r.my_total ?? r.total_contributed ?? 0);
+      return {
+        id: String(r.id),
+        name: String(r.name),
+        description: r.description ? String(r.description) : null,
+        minimum_deposit: Math.round(Number(r.minimum_deposit ?? r.contribution_amount ?? 0) / 100),
+        end_date: r.end_date ? String(r.end_date) : null,
+        next_payout_date: r.next_payout_date ? String(r.next_payout_date) : (r.end_date ? String(r.end_date) : null),
+        total_balance: Math.round(Number(r.total_balance ?? 0) / 100),
+        total_pool: Math.round(totalPoolKobo / 100),
+        my_total: Math.round(myTotalKobo / 100),
+        member_count: Number(r.member_count ?? 0),
+        status: String(r.status || 'active'),
+        joined: Boolean(r.joined),
+        total_contributed: r.total_contributed != null ? Math.round(Number(r.total_contributed) / 100) : undefined,
+        estimated_return: r.estimated_return != null ? Math.round(Number(r.estimated_return) / 100) : undefined,
+        merchant_squad_account: r.merchant_squad_account ? String(r.merchant_squad_account) : null,
+      };
+    });
   },
 
   joinGroup: async (ajoId: string): Promise<{ success: boolean }> => {

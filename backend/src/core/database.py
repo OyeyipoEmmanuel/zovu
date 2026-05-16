@@ -132,6 +132,18 @@ def _apply_schema_patches(connection):
         if "scheduled_at" not in gig_cols:
             patches.append("ALTER TABLE gigs ADD COLUMN scheduled_at TIMESTAMP NULL")
 
+    if "ajo_transactions" in inspector.get_table_names():
+        ajo_tx_cols = {col["name"] for col in inspector.get_columns("ajo_transactions")}
+        if "paid_at" not in ajo_tx_cols:
+            patches.append("ALTER TABLE ajo_transactions ADD COLUMN paid_at TIMESTAMP NULL")
+        if "on_time" not in ajo_tx_cols:
+            patches.append("ALTER TABLE ajo_transactions ADD COLUMN on_time BOOLEAN NULL")
+
+    if "ajos" in inspector.get_table_names():
+        ajos_cols = {col["name"] for col in inspector.get_columns("ajos")}
+        if "next_due_date" not in ajos_cols:
+            patches.append("ALTER TABLE ajos ADD COLUMN next_due_date TIMESTAMP NULL")
+
     for sql in patches:
         try:
             connection.execute(text(sql))

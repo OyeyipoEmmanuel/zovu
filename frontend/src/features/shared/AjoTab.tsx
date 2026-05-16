@@ -37,6 +37,16 @@ export const AjoTab: React.FC = () => {
 
   useEffect(() => {
     void load();
+    // Poll every 5s while the tab is open so the pool total reacts to
+    // webhook-confirmed contributions without a manual refresh. (The spec
+    // calls for Supabase realtime; this codebase doesn't have a realtime
+    // client wired up, so polling is the pragmatic substitute.) Pauses
+    // when the tab is backgrounded to avoid burning the API.
+    const tick = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
   }, [load]);
 
   const handleJoin = async (id: string) => {
@@ -141,28 +151,22 @@ export const AjoTab: React.FC = () => {
                 <div className="font-dm text-[14px] text-[#F5F5F5]">{g.member_count}</div>
               </div>
               <div>
-                <div className="font-dm text-[10px] text-[#A0A0A0] uppercase">Pool</div>
-                <div className="font-dm text-[14px] text-[#F5F5F5]">₦{g.total_balance.toLocaleString()}</div>
+                <div className="font-dm text-[10px] text-[#A0A0A0] uppercase">Total Pool</div>
+                <div className="font-dm text-[14px] text-[#F5F5F5]">₦{g.total_pool.toLocaleString()}</div>
               </div>
               <div>
-                <div className="font-dm text-[10px] text-[#A0A0A0] uppercase">Your savings</div>
+                <div className="font-dm text-[10px] text-[#A0A0A0] uppercase">My Contribution</div>
                 <div className="font-dm text-[14px] text-[#F5F5F5]">
-                  ₦{(g.total_contributed ?? 0).toLocaleString()}
+                  ₦{g.my_total.toLocaleString()}
                 </div>
               </div>
               <div>
-                <div className="font-dm text-[10px] text-[#A0A0A0] uppercase">Est. return</div>
+                <div className="font-dm text-[10px] text-[#A0A0A0] uppercase">Next Payout</div>
                 <div className="font-dm text-[14px] text-[#1A6B4A]">
-                  ₦{(g.estimated_return ?? 0).toLocaleString()}
+                  {g.next_payout_date ? new Date(g.next_payout_date).toLocaleDateString() : '—'}
                 </div>
               </div>
             </div>
-
-            {g.end_date && (
-              <div className="font-dm text-[12px] text-[#A0A0A0]">
-                Ends {new Date(g.end_date).toLocaleDateString()}
-              </div>
-            )}
 
             {g.merchant_squad_account && (
               <div className="bg-[#0D0D0D] border border-[#1A6B4A]/30 rounded-[8px] p-3 flex items-center justify-between gap-3">

@@ -12,6 +12,7 @@ Event dispatch (process_squad_webhook):
 from src.workers.celery_app import celery_app
 import structlog
 import asyncio
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 logger = structlog.get_logger()
@@ -391,8 +392,18 @@ async def _handle_payout_result(db, payload: dict, webhook_id: str, success: boo
         if ajo_tx and ajo_tx.status != new_status:
             ajo_tx.status = new_status
             if success:
+                paid_at = datetime.now(timezone.utc)
+                ajo_tx.paid_at = paid_at
                 ajo = await db.scalar(select(Ajo).where(Ajo.id == ajo_tx.ajo_id))
                 if ajo is not None:
+                    # on_time: paid_at <= next_due_date if set, else end_date;
+                    # if neither is set we leave on_time NULL (unknown) rather
+                    # than defaulting to a value that would bias the score.
+                    due = ajo.next_due_date or ajo.end_date
+                    if due is not None:
+                        if due.tzinfo is None:
+                            due = due.replace(tzinfo=timezone.utc)
+                        ajo_tx.on_time = paid_at <= due
                     ajo.total_balance = int(ajo.total_balance or 0) + int(ajo_tx.amount or 0)
                 membership = await db.scalar(
                     select(AjoMembership).where(
@@ -409,6 +420,7 @@ async def _handle_payout_result(db, payload: dict, webhook_id: str, success: boo
                     "ajo_id": ajo_tx.ajo_id,
                     "ajo_transaction_id": ajo_tx.id,
                     "amount": int(ajo_tx.amount or 0),
+                    "on_time": ajo_tx.on_time,
                 }
                 logger.info("squad_webhook_ajo_contribution_reconciled", **ajo_reconciled)
 

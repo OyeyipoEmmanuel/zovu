@@ -26,20 +26,35 @@ import { ServicesTab } from './features/shared/ServicesTab';
 const DashboardRouter = () => {
   const { user } = useAuthStore();
   if (!user) return <Navigate to="/login" replace />;
-  
+
   const role = user.role?.toLowerCase();
+  // profile_complete is set on the AuthUser from the /auth/login response and
+  // is the single source of truth for "has this user finished onboarding/KYC?"
+  // Only treat it as incomplete when the backend explicitly says false — when
+  // the flag is missing/undefined (older response or refresh shape) prefer the
+  // dashboard so we don't bounce returning users to KYC.
+  const profileComplete = user.profile_complete !== false;
+
   if (role === 'admin') {
     return <Navigate to="/admin" replace />;
   }
+
   if (role === 'partner' || role === 'lender' || role === 'both') {
-    return <Navigate to="/dashboard/partners" replace />;
-  }
-  
-  if (role === 'job_seeker') {
-    return <Navigate to="/dashboard/job-seeker/onboarding" replace />;
+    return profileComplete
+      ? <Navigate to="/dashboard/partners" replace />
+      : <Navigate to="/dashboard/partners/complete-profile/account" replace />;
   }
 
-  return <Navigate to="/dashboard/trader" replace />;
+  if (role === 'job_seeker') {
+    return profileComplete
+      ? <Navigate to="/dashboard/job-seeker" replace />
+      : <Navigate to="/dashboard/job-seeker/onboarding" replace />;
+  }
+
+  // trader (default)
+  return profileComplete
+    ? <Navigate to="/dashboard/trader" replace />
+    : <Navigate to="/dashboard/trader/complete-profile/kyc" replace />;
 };
 
 function App() {

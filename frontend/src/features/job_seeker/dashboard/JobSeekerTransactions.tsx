@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { jobSeekerAPI, fetchUserProfile, type UserProfile } from '../../../lib/api';
 import type { JSTransaction } from '../../../lib/mockData';
 import { ComplaintModal } from '../../shared/ComplaintModal';
+import { TransactionDetailModal } from '../../shared/TransactionDetailModal';
 import { AlertTriangle, ArrowDown, ArrowUp, Copy, Check } from 'lucide-react';
 
 const formatTime = (timestamp: string) => {
@@ -26,6 +27,7 @@ export const JobSeekerTransactions: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [vaBalance, setVaBalance] = useState(0);
   const [complaintFor, setComplaintFor] = useState<JSTransaction | null>(null);
+  const [detailTxId, setDetailTxId] = useState<string | null>(null);
 
   const vaNumber = profile?.squadVaNumber || '';
   const vaBank = profile?.squadVaBank || '';
@@ -146,7 +148,11 @@ export const JobSeekerTransactions: React.FC = () => {
             const senderName = txn.senderName || 'ZOVU system';
             const receiverName = txn.receiverName || 'ZOVU system';
             return (
-              <div key={txn.id} className="flex items-center justify-between p-4 hover:bg-zovu-surface-2/30 transition-colors">
+              <div
+                key={txn.id}
+                onClick={() => setDetailTxId(txn.id)}
+                className="flex items-center justify-between p-4 hover:bg-zovu-surface-2/30 transition-colors cursor-pointer"
+              >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${txn.type === 'inflow' ? 'bg-[#1A6B4A]/10 text-[#1A6B4A]' : 'bg-[#EF4444]/10 text-[#EF4444]'}`}>
                     {txn.type === 'inflow' ? <ArrowDown size={16} /> : <ArrowUp size={16} />}
@@ -163,7 +169,10 @@ export const JobSeekerTransactions: React.FC = () => {
                       <span className="text-zovu-border">·</span>
                       <button
                         type="button"
-                        onClick={() => handleCopyRef(txn.reference)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyRef(txn.reference);
+                        }}
                         className="font-dm text-[11px] text-zovu-text hover:text-[#1A6B4A] transition-colors inline-flex items-center gap-1"
                       >
                         {copiedRef === txn.reference ? (
@@ -181,7 +190,10 @@ export const JobSeekerTransactions: React.FC = () => {
                   </span>
                   <button
                     type="button"
-                    onClick={() => setComplaintFor(txn)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setComplaintFor(txn);
+                    }}
                     title="Report an issue"
                     aria-label="Report an issue"
                     className="p-2 rounded-md text-zovu-text hover:text-[#F4A11D] hover:bg-zovu-surface-2/60 transition-colors"
@@ -200,6 +212,13 @@ export const JobSeekerTransactions: React.FC = () => {
           transactionId={complaintFor.id}
           transactionLabel={`${complaintFor.counterparty} • ₦${complaintFor.amount.toLocaleString('en-NG')}`}
           onClose={() => setComplaintFor(null)}
+        />
+      )}
+
+      {detailTxId && (
+        <TransactionDetailModal
+          transactionId={detailTxId}
+          onClose={() => setDetailTxId(null)}
         />
       )}
     </div>

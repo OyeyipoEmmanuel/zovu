@@ -494,13 +494,33 @@ class Gig(Base):
 
 
 class GigApplication(Base):
-    """Application by a job seeker to a gig."""
+    """Application by a job seeker to a gig.
+
+    `status` is governed by the escrow state machine — see
+    alembic/versions/010_job_escrow_state_machine.py for the value list and
+    transitions. Money is reserved against the trader on accept and only
+    released by trader_confirmed (or admin via the support ticket route).
+    """
     __tablename__ = "gig_applications"
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     gig_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("gigs.id", ondelete="CASCADE"))
     seeker_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
-    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending | accepted | rejected
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    # Kobo amount reserved off the trader when this application is accepted.
+    # Held until trader_confirmed (payout) or admin resolution.
+    reserved_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Set when the seeker marks the job done.
+    worker_done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # worker_done_at + 24h — the trader has until this point to confirm or
+    # dispute, otherwise the Celery deadline task escalates to in_dispute.
+    confirmation_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Celery task id for the deadline check, so a trader_confirmed transition
+    # can revoke the scheduled task.
+    celery_deadline_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Free-text note attached to the application — used by Task 9 to surface
+    # the trader's phone number to a nearby seeker.
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -508,6 +528,7 @@ class GigApplication(Base):
         UniqueConstraint("gig_id", "seeker_id", name="uq_gig_seeker_application"),
         Index("ix_gig_applications_gig_id", "gig_id"),
         Index("ix_gig_applications_seeker_id", "seeker_id"),
+        Index("ix_gig_applications_status", "status"),
     )
 
 
@@ -564,6 +585,9 @@ class Ajo(Base):
     status: Mapped[AjoStatus] = mapped_column(SQLEnum(AjoStatus), default=AjoStatus.ACTIVE)
     payout_schedule: Mapped[list | None] = mapped_column(JSON)  # Array of member order
     end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Optional admin-managed due date for the *next* contribution cycle. Used
+    # by the webhook reconciler to flag a contribution on_time/late.
+    next_due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     merchant_squad_account: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -681,6 +705,11 @@ class AjoTransaction(Base):
     status: Mapped[str] = mapped_column(String(20), default="completed", server_default="completed")
     squad_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # paid_at is null until the Squad webhook confirms the inbound payment.
+    # on_time is set at the same time, comparing paid_at to ajos.next_due_date
+    # (falling back to ajos.end_date when next_due_date is null).
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    on_time: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
