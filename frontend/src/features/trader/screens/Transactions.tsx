@@ -101,45 +101,60 @@ export const Transactions: React.FC = () => {
             </div>
           ) : (
             <div className="divide-y divide-zovu-border">
-              {transactions.map((txn) => (
-                <div key={txn.id} className="flex items-center gap-3 px-5 py-4 hover:bg-zovu-surface-2/50 transition-colors duration-150">
+              {transactions.map((txn) => {
+                // The backend now resolves the counterparty name + a purpose
+                // string for every row (Phase 1 enrichment). We surface both
+                // distinctly: counterparty headline, purpose subline.
+                const purpose = txn.purpose || txn.description;
+                const sender = txn.senderName || 'ZOVU system';
+                const receiver = txn.receiverName || 'ZOVU system';
+                return (
                   <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                      txn.type === 'inflow' ? 'bg-zovu-primary/10' : 'bg-red-500/10'
-                    }`}
+                    key={txn.id}
+                    className="flex items-center gap-3 px-5 py-4 hover:bg-zovu-surface-2/50 transition-colors duration-150"
                   >
-                    {txn.type === 'inflow' ? (
-                      <HiOutlineArrowDown size={18} className="text-zovu-primary" />
-                    ) : (
-                      <HiOutlineArrowUp size={18} className="text-red-400" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-dm text-[14px] text-zovu-text-light truncate">{txn.counterparty}</p>
-                    <p className="font-dm text-[11px] text-zovu-text mt-0.5">{txn.description}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p
-                      className={`font-dm text-[14px] font-medium tabular-nums ${
-                        txn.type === 'inflow' ? 'text-zovu-primary' : 'text-red-400'
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                        txn.type === 'inflow' ? 'bg-zovu-primary/10' : 'bg-red-500/10'
                       }`}
                     >
-                      {txn.type === 'inflow' ? '+' : '-'}{formatCurrency(txn.amount)}
-                    </p>
-                    <p className="font-dm text-[11px] text-zovu-text mt-0.5">{formatRelativeTime(txn.timestamp)}</p>
-                    <p className="font-dm text-[10px] text-zovu-text/50 mt-0.5 font-mono">{txn.reference}</p>
+                      {txn.type === 'inflow' ? (
+                        <HiOutlineArrowDown size={18} className="text-zovu-primary" />
+                      ) : (
+                        <HiOutlineArrowUp size={18} className="text-red-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-dm text-[14px] text-zovu-text-light truncate">{txn.counterparty}</p>
+                      <p className="font-dm text-[12px] text-zovu-text mt-0.5 truncate">{purpose}</p>
+                      <p className="font-dm text-[11px] text-zovu-text/70 mt-0.5 truncate">
+                        <span className="text-zovu-text/50">From</span> {sender}{' '}
+                        <span className="text-zovu-text/50">→</span> {receiver}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p
+                        className={`font-dm text-[14px] font-medium tabular-nums ${
+                          txn.type === 'inflow' ? 'text-zovu-primary' : 'text-red-400'
+                        }`}
+                      >
+                        {txn.type === 'inflow' ? '+' : '-'}{formatCurrency(txn.amount)}
+                      </p>
+                      <p className="font-dm text-[11px] text-zovu-text mt-0.5">{formatRelativeTime(txn.timestamp)}</p>
+                      <p className="font-dm text-[10px] text-zovu-text/50 mt-0.5 font-mono">{txn.reference}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setComplaintFor(txn)}
+                      title="Report an issue with this transaction"
+                      aria-label="Report an issue with this transaction"
+                      className="p-2 text-zovu-text hover:text-[#F4A11D] transition-colors"
+                    >
+                      <HiOutlineExclamationCircle size={18} />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setComplaintFor(txn)}
-                    title="Report an issue with this transaction"
-                    aria-label="Report an issue with this transaction"
-                    className="p-2 text-zovu-text hover:text-[#F4A11D] transition-colors"
-                  >
-                    <HiOutlineExclamationCircle size={18} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

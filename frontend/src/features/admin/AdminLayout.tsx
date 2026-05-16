@@ -7,10 +7,23 @@ import { Outlet, Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { adminMetricsAPI } from "@/services/adminApi";
 import { LogoutButton } from "../shared/LogoutButton";
+import {
+  LayoutDashboard,
+  FolderOpen,
+  ShieldAlert,
+  LineChart,
+  Handshake,
+  Coins,
+  FileClock,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  type LucideIcon,
+} from "lucide-react";
 
 interface NavItem {
   label: string;
-  icon: string;
+  Icon: LucideIcon;
   path: string;
   badge?: number;
 }
@@ -26,48 +39,33 @@ export const AdminLayout: React.FC = () => {
     refetchInterval: 120000, // 2 minutes
   });
 
-  const alerts = overview?.data?.alerts || {};
+  // request() unwraps the envelope, so `overview` IS the metrics payload.
+  const alerts = ((overview as any) || {}).alerts || {};
 
   const navItems: NavItem[] = [
-    {
-      label: "Overview",
-      icon: "📊",
-      path: "/admin",
-      badge: undefined,
-    },
+    { label: "Overview", Icon: LayoutDashboard, path: "/admin" },
     {
       label: "Complaints",
-      icon: "🗂️",
+      Icon: FolderOpen,
       path: "/admin/complaints",
       badge: alerts.unresolved_complaints,
     },
     {
       label: "Fraud Management",
-      icon: "🚨",
+      Icon: ShieldAlert,
       path: "/admin/fraud",
       badge: alerts.new_fraud_flags,
     },
-    {
-      label: "Metrics",
-      icon: "📈",
-      path: "/admin/metrics",
-    },
+    { label: "Metrics", Icon: LineChart, path: "/admin/metrics" },
     {
       label: "Partnerships",
-      icon: "🤝",
+      Icon: Handshake,
       path: "/admin/partnerships",
       badge: alerts.pending_partnerships,
     },
-    {
-      label: "Ajo",
-      icon: "🪙",
-      path: "/admin/ajo",
-    },
-    {
-      label: "Audit Log",
-      icon: "📋",
-      path: "/admin/audit",
-    },
+    { label: "Partners", Icon: Building2, path: "/admin/partners" },
+    { label: "Ajo", Icon: Coins, path: "/admin/ajo" },
+    { label: "Audit Log", Icon: FileClock, path: "/admin/audit" },
   ];
 
   return (
@@ -97,7 +95,12 @@ export const AdminLayout: React.FC = () => {
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-2">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            // Treat the route as active if it matches exactly OR a deeper
+            // child route is open (e.g. /admin/complaints/<id>).
+            const isActive =
+              location.pathname === item.path ||
+              (item.path !== "/admin" && location.pathname.startsWith(`${item.path}/`));
+            const Icon = item.Icon;
             return (
               <Link
                 key={item.path}
@@ -105,10 +108,10 @@ export const AdminLayout: React.FC = () => {
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors relative ${
                   isActive
                     ? "bg-[#1A6B4A] text-white"
-                    : "text-white/60 hover:bg-white/5"
+                    : "text-white/60 hover:bg-white/5 hover:text-white"
                 }`}
               >
-                <span className="text-lg">{item.icon}</span>
+                <Icon size={20} strokeWidth={1.75} />
                 {sidebarOpen && (
                   <>
                     <span className="font-dm-sans text-sm font-medium">
@@ -136,10 +139,10 @@ export const AdminLayout: React.FC = () => {
           <button
             type="button"
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="w-full p-2 hover:bg-white/5 rounded-lg text-white/60 text-sm"
+            className="w-full p-2 hover:bg-white/5 rounded-lg text-white/60 text-sm flex items-center justify-center"
             aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
           >
-            {sidebarOpen ? "←" : "→"}
+            {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
           </button>
         </div>
       </aside>

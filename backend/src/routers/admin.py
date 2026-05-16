@@ -710,6 +710,48 @@ async def list_pending_partners(
     ]}
 
 
+@router.get("/partners")
+async def list_all_partners(
+    status: str | None = Query(None, description="Filter: pending|approved|banned"),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List every lender/partner account in the system.
+
+    Drives the admin "Partners" view — surfaces newly registered partners
+    immediately (alongside approved and banned ones) so admin can act on them.
+    """
+    q = select(User).where(User.role == "lender").order_by(User.created_at.desc())
+    if status == "pending":
+        q = q.where(User.partner_approved == False).where(User.is_banned == False)  # noqa: E712
+    elif status == "approved":
+        q = q.where(User.partner_approved == True).where(User.is_banned == False)  # noqa: E712
+    elif status == "banned":
+        q = q.where(User.is_banned == True)  # noqa: E712
+
+    rows = (await db.execute(q)).scalars().all()
+    return {"ok": True, "data": [
+        {
+            "id": u.id,
+            "email": u.email,
+            "company_name": u.company_name,
+            "full_name": u.full_name,
+            "email_verified": bool(u.email_verified),
+            "partner_approved": bool(u.partner_approved),
+            "partner_approved_at": u.partner_approved_at.isoformat() if u.partner_approved_at else None,
+            "is_banned": bool(u.is_banned),
+            "ban_reason": u.ban_reason,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "status": (
+                "banned" if u.is_banned
+                else "approved" if u.partner_approved
+                else "pending"
+            ),
+        }
+        for u in rows
+    ]}
+
+
 @router.post("/partners/{user_id}/approve")
 async def approve_partner(
     user_id: UUID,

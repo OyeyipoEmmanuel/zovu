@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { PartnerRoutes, JobSeekerRoutes, AdminRoutes } from './router';
-import { LandingPage } from './features/LandingPage';
+import { LandingPage, PublicJobsPage } from './features/LandingPage';
 import {
   Login,
   Signup,
@@ -47,6 +47,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/jobs" element={<PublicJobsPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 

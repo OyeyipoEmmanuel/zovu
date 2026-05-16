@@ -113,7 +113,15 @@ export const Signup: React.FC = () => {
         squad_account_bank: res.user.squad_account_bank,
         squad_provisioned: res.user.squad_provisioned,
       });
-      navigate('/dashboard');
+      // Deep-link: if the visitor arrived from a "Sign up to apply" link on
+      // a public job listing, drop them into the seeker job feed (where the
+      // job they wanted lives) instead of the generic dashboard.
+      const applyGigId = searchParams.get('apply');
+      if (applyGigId && (res.user.role || '').toLowerCase().includes('seek')) {
+        navigate('/dashboard/job-seeker/jobs');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (e: unknown) {
       if (e instanceof ApiError) {
         if (e.code === 'TOO_MANY_ATTEMPTS') {

@@ -5,6 +5,9 @@ import {
   squadPaySeeker,
   type GigApplicant,
 } from '../../../lib/api';
+import { RatingBadge } from '../../shared/RatingBadge';
+import { ReviewModal } from '../../shared/ReviewModal';
+import { Star } from 'lucide-react';
 
 const formatNaira = (kobo: number) => `₦${Math.round(kobo / 100).toLocaleString('en-NG')}`;
 const formatDate = (iso: string) =>
@@ -30,6 +33,7 @@ export const Applicants: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [payOpen, setPayOpen] = useState<GigApplicant | null>(null);
   const [payAmount, setPayAmount] = useState('');
+  const [reviewFor, setReviewFor] = useState<GigApplicant | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -128,9 +132,14 @@ export const Applicants: React.FC = () => {
             >
               <div className="flex flex-col sm:flex-row justify-between gap-4 mb-4">
                 <div>
-                  <h3 className="font-syne text-[18px] font-bold text-zovu-text-light">
-                    {row.seeker.display_name}
-                  </h3>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h3 className="font-syne text-[18px] font-bold text-zovu-text-light">
+                      {row.seeker.display_name}
+                    </h3>
+                    {/* Seeker rating is only shown after they applied — which
+                        is exactly the state we're in on the Applicants screen. */}
+                    <RatingBadge userId={row.seeker.id} showWhenEmpty />
+                  </div>
                   <p className="font-dm text-[12px] text-zovu-text mt-0.5">
                     {row.seeker.email}
                   </p>
@@ -206,10 +215,31 @@ export const Applicants: React.FC = () => {
                     Seeker needs to finish KYC before they can be paid.
                   </span>
                 )}
+                {row.status === 'accepted' && (
+                  <button
+                    type="button"
+                    onClick={() => setReviewFor(row)}
+                    className="px-4 py-2 bg-white/5 border border-white/10 text-zovu-text-light font-dm text-[13px] font-medium rounded-[8px] hover:bg-white/10 transition-all flex items-center gap-2"
+                  >
+                    <Star size={14} />
+                    Review seeker
+                  </button>
+                )}
               </div>
             </article>
           ))}
         </div>
+      )}
+
+      {reviewFor && (
+        <ReviewModal
+          gigId={reviewFor.gig_id}
+          revieweeId={reviewFor.seeker.id}
+          revieweeName={reviewFor.seeker.display_name}
+          revieweeRole="the job seeker"
+          onClose={() => setReviewFor(null)}
+          onSubmitted={() => setSuccess(`Review submitted for ${reviewFor.seeker.display_name}.`)}
+        />
       )}
 
       {/* Pay modal */}

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { adminAjoAPI } from "@/services/adminApi";
+import { Coins, Plus, Calendar, Users, Wallet } from "lucide-react";
 
 interface AjoRow {
   id: string;
@@ -16,6 +17,18 @@ interface AjoRow {
   created_at: string;
 }
 
+interface AjoTxnRow {
+  id: string;
+  ajo_id: string;
+  ajo_name: string;
+  user_id: string;
+  user_email: string;
+  amount: number;
+  type: string;
+  status: string;
+  timestamp: string;
+}
+
 const formatNaira = (kobo: number) =>
   `₦${Math.round((kobo || 0) / 100).toLocaleString("en-NG")}`;
 
@@ -23,10 +36,21 @@ const AjoManagement: React.FC = () => {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
 
+  // request() in services/api.ts already unwraps the {ok, data} envelope,
+  // so groupsQuery.data IS the AjoRow[] (no extra .data hop).
   const groupsQuery = useQuery({
     queryKey: ["admin", "ajo", "groups"],
+    queryFn: () => adminAjoAPI.listGroups() as Promise<AjoRow[]>,
+    // Auto-refresh so newly-created groups (created via this screen or
+    // through the /admin/ajo/groups API) show up without a manual reload.
+    refetchInterval: 20000,
+  });
+
+  const txnsQuery = useQuery({
+    queryKey: ["admin", "ajo", "transactions"],
     queryFn: () =>
-      adminAjoAPI.listGroups() as Promise<{ ok: boolean; data: AjoRow[] }>,
+      adminAjoAPI.listTransactions({ limit: 25 }) as Promise<AjoTxnRow[]>,
+    refetchInterval: 30000,
   });
 
   const create = useMutation({
@@ -43,18 +67,23 @@ const AjoManagement: React.FC = () => {
     },
   });
 
-  const rows = groupsQuery.data?.data || [];
+  const rows: AjoRow[] = groupsQuery.data ?? [];
+  const txns: AjoTxnRow[] = txnsQuery.data ?? [];
 
   return (
     <div className="text-white max-w-5xl">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="font-syne text-[28px] font-bold">Ajo Management</h1>
+        <h1 className="font-syne text-[28px] font-bold flex items-center gap-2">
+          <Coins size={26} className="text-[#F4A11D]" />
+          Ajo Management
+        </h1>
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          className="px-4 py-2 bg-[#1A6B4A] text-white font-dm text-[13px] font-medium rounded-[8px] hover:brightness-110"
+          className="px-4 py-2 bg-[#1A6B4A] text-white font-dm text-[13px] font-medium rounded-[8px] hover:brightness-110 flex items-center gap-2"
         >
-          + Create Ajo group
+          <Plus size={14} />
+          Create Ajo group
         </button>
       </div>
 
@@ -92,14 +121,16 @@ const AjoManagement: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-dm text-[13px] mb-3">
-              <Stat label="Min deposit" value={formatNaira(g.minimum_deposit)} />
-              <Stat label="Pool" value={formatNaira(g.total_balance)} />
+              <Stat label="Min deposit" icon={<Wallet size={12} />} value={formatNaira(g.minimum_deposit)} />
+              <Stat label="Pool" icon={<Wallet size={12} />} value={formatNaira(g.total_balance)} />
               <Stat
                 label="Members"
+                icon={<Users size={12} />}
                 value={`${g.member_count}/${g.max_members}`}
               />
               <Stat
                 label="Ends"
+                icon={<Calendar size={12} />}
                 value={
                   g.end_date
                     ? new Date(g.end_date).toLocaleDateString("en-GB")
@@ -117,6 +148,47 @@ const AjoManagement: React.FC = () => {
         ))}
       </div>
 
+      {/* Live Ajo transactions feed */}
+      <section className="mt-10">
+        <h2 className="font-syne text-[20px] font-bold mb-3">Recent Ajo activity</h2>
+        {txnsQuery.isLoading ? (
+          <p className="font-dm text-white/60">Loading…</p>
+        ) : txns.length === 0 ? (
+          <div className="bg-[#161616] border border-white/10 rounded-[12px] p-6 text-center font-dm text-white/60">
+            No contributions or payouts recorded yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto bg-[#161616] border border-white/10 rounded-[12px]">
+            <table className="w-full text-left text-[13px] font-dm">
+              <thead className="text-white/50 uppercase text-[11px] border-b border-white/10">
+                <tr>
+                  <th className="px-4 py-3">Ajo</th>
+                  <th className="px-4 py-3">Member</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">When</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {txns.map((t) => (
+                  <tr key={t.id}>
+                    <td className="px-4 py-3 text-white">{t.ajo_name}</td>
+                    <td className="px-4 py-3 text-white/80">{t.user_email}</td>
+                    <td className="px-4 py-3 capitalize text-white/80">{t.type}</td>
+                    <td className="px-4 py-3 text-white tabular-nums">{formatNaira(t.amount)}</td>
+                    <td className="px-4 py-3 text-white/70">{t.status}</td>
+                    <td className="px-4 py-3 text-white/50">
+                      {t.timestamp ? new Date(t.timestamp).toLocaleString("en-GB") : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {createOpen && (
         <CreateAjoModal
           submitting={create.isPending}
@@ -129,9 +201,16 @@ const AjoManagement: React.FC = () => {
   );
 };
 
-const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const Stat: React.FC<{ label: string; value: string; icon?: React.ReactNode }> = ({
+  label,
+  value,
+  icon,
+}) => (
   <div>
-    <p className="text-white/50 mb-0.5">{label}</p>
+    <p className="text-white/50 mb-0.5 flex items-center gap-1">
+      {icon}
+      {label}
+    </p>
     <p className="text-white font-medium">{value}</p>
   </div>
 );

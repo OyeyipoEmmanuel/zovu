@@ -11,6 +11,15 @@ export interface Transaction {
   timestamp: string;
   reference: string;
   description: string;
+  /** Backend-derived label e.g. "Contribution to Ajo 'Lagos Daily Savers'". */
+  purpose?: string;
+  /** Display name of the sender, regardless of whether they're the viewer. */
+  senderName?: string | null;
+  /** Display name of the receiver, regardless of whether they're the viewer. */
+  receiverName?: string | null;
+  /** Squad reference + a feed-friendly one-liner from the backend. */
+  feedLabel?: string;
+  status?: string;
 }
 
 export interface PulseSignal {
@@ -30,11 +39,17 @@ export interface Gig {
   pay: number;
   payPeriod: 'Per Hour' | 'Per Day' | 'Fixed';
   location: string;
+  /** Specific street/site address — surfaced in the seeker's "call trader on arrival" note. */
+  directLocation?: string | null;
+  /** ISO timestamp of when the trader expects the seeker to start. */
+  scheduledAt?: string | null;
   urgency: 'Normal' | 'Urgent';
   skills: string[];
   languages: string[];
   postedAt: string;
   status: 'active' | 'closed';
+  /** Trader's id — used to fetch their public rating in listings. */
+  traderId?: string;
 }
 
 export interface VirtualAccount {
@@ -66,6 +81,8 @@ export interface JobMatch {
   id: string;
   title: string;
   employer: string;
+  /** The trader's user id — used to fetch their public rating in listings. */
+  trader_id?: string;
   pay: number;
   pay_period: string;
   lga: string;
@@ -75,6 +92,10 @@ export interface JobMatch {
   posted: string;
   urgent: boolean;
   applied: boolean;
+  /** Optional street address surfaced when applying to a gig. */
+  direct_location?: string | null;
+  /** ISO timestamp of when the trader expects the seeker to start. */
+  scheduled_at?: string | null;
 }
 
 export interface GigRecord {
@@ -97,6 +118,12 @@ export interface JSTransaction {
   timestamp: string;
   reference: string;
   description: string;
+  /** Phase-1 enrichment fields. */
+  purpose?: string;
+  senderName?: string | null;
+  receiverName?: string | null;
+  feedLabel?: string;
+  status?: string;
 }
 
 export interface JSNotification {
@@ -281,6 +308,15 @@ interface TxnListItem {
   squad_reference?: string | null;
   transaction_type?: string;
   feed_label?: string;
+  // Phase-1 enrichment fields from /api/v1/transactions
+  sender_id?: string | null;
+  sender_name?: string | null;
+  receiver_id?: string | null;
+  receiver_name?: string | null;
+  counterparty_display?: string | null;
+  counterparty_id?: string | null;
+  purpose?: string | null;
+  status?: string | null;
 }
 
 let meCache: { at: number; me: AuthMeResponse } | null = null;
@@ -334,15 +370,34 @@ const mapMeToUserProfile = (me: AuthMeResponse): UserProfile => {
   };
 };
 
-const mapTxnRow = (row: TxnListItem): Transaction => ({
-  id: row.id,
-  type: row.direction === 'inflow' ? 'inflow' : 'outflow',
-  counterparty: row.feed_label || String(row.transaction_type || 'Transaction').replace(/_/g, ' '),
-  amount: Math.round((row.amount ?? 0) / 100),
-  timestamp: row.created_at,
-  reference: row.squad_reference || row.id,
-  description: String(row.transaction_type || '').replace(/_/g, ' '),
-});
+const mapTxnRow = (row: TxnListItem): Transaction => {
+  // Prefer the backend's resolved counterparty display name; fall back to the
+  // raw transaction-type label so older clients keep working.
+  const counterparty =
+    row.counterparty_display ||
+    (row.direction === 'inflow' ? row.sender_name : row.receiver_name) ||
+    row.feed_label ||
+    String(row.transaction_type || 'Transaction').replace(/_/g, ' ');
+
+  // The backend now sends a human-friendly purpose for every row.
+  // Fall back to the transaction_type so the description column is never empty.
+  const purpose = row.purpose || String(row.transaction_type || '').replace(/_/g, ' ');
+
+  return {
+    id: row.id,
+    type: row.direction === 'inflow' ? 'inflow' : 'outflow',
+    counterparty,
+    amount: Math.round((row.amount ?? 0) / 100),
+    timestamp: row.created_at,
+    reference: row.squad_reference || row.id,
+    description: purpose,
+    purpose,
+    senderName: row.sender_name ?? null,
+    receiverName: row.receiver_name ?? null,
+    feedLabel: row.feed_label,
+    status: row.status ?? undefined,
+  };
+};
 
 const mapBackendGigToGig = (g: Record<string, unknown>): Gig => {
   const payKobo = Number(g.amount ?? 0);
@@ -369,6 +424,9 @@ const mapBackendGigToGig = (g: Record<string, unknown>): Gig => {
     languages: [],
     postedAt: String(g.created_at || new Date().toISOString()),
     status,
+    directLocation: typeof g.direct_location === 'string' ? g.direct_location : null,
+    scheduledAt: typeof g.scheduled_at === 'string' ? g.scheduled_at : null,
+    traderId: typeof g.trader_id === 'string' ? g.trader_id : undefined,
   };
 };
 
@@ -376,6 +434,7 @@ const mapJobRow = (row: Record<string, unknown>): JobMatch => ({
   id: String(row.id),
   title: String(row.title || ''),
   employer: String(row.employer || ''),
+  trader_id: typeof row.trader_id === 'string' ? row.trader_id : undefined,
   pay: Math.round(Number(row.pay ?? 0) / 100),
   pay_period: String(row.pay_period || 'gig'),
   lga: String(row.lga || row.location || ''),
@@ -385,6 +444,8 @@ const mapJobRow = (row: Record<string, unknown>): JobMatch => ({
   posted: String(row.created_at || row.posted || new Date().toISOString()),
   urgent: Boolean(row.urgent),
   applied: Boolean(row.applied),
+  direct_location: typeof row.direct_location === 'string' ? row.direct_location : null,
+  scheduled_at: typeof row.scheduled_at === 'string' ? row.scheduled_at : null,
 });
 
 // ─── User ──────────────────────────────────────────────────
@@ -471,7 +532,7 @@ export const fetchPulseHistory = async (): Promise<PulseHistoryPoint[]> => {
 export const postGig = async (
   gig: Omit<Gig, 'id' | 'postedAt' | 'status'>
 ): Promise<Gig> => {
-  const body = {
+  const body: Record<string, unknown> = {
     title: gig.title,
     description: gig.description,
     skill_required: gig.skills.length ? gig.skills.join(', ') : 'General',
@@ -479,11 +540,67 @@ export const postGig = async (
     amount: Math.max(1, Math.round(gig.pay * 100)),
     payment_period: gig.payPeriod,
   };
+  if (gig.directLocation && gig.directLocation.trim()) {
+    body.direct_location = gig.directLocation.trim();
+  }
+  if (gig.scheduledAt) {
+    body.scheduled_at = gig.scheduledAt;
+  }
   const created = await v1OkData<Record<string, unknown>>('/gigs', {
     method: 'POST',
     body: JSON.stringify(body),
   });
   return mapBackendGigToGig(created);
+};
+
+
+// ─── Reviews ──────────────────────────────────────────────
+export interface ReviewItem {
+  id: string;
+  reviewer_id: string;
+  reviewer_name: string | null;
+  reviewer_role: 'trader' | 'seeker' | string;
+  reviewee_id: string;
+  gig_id: string | null;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+}
+
+export interface ReviewAggregate {
+  user_id: string;
+  review_count: number;
+  average_rating: number;
+  reviews?: ReviewItem[];
+}
+
+export const fetchUserReviews = async (userId: string, limit = 20): Promise<ReviewAggregate> => {
+  return await v1OkData<ReviewAggregate>(`/reviews/users/${userId}?limit=${limit}`, { method: 'GET' });
+};
+
+export const fetchUserRatingAggregate = async (userId: string): Promise<ReviewAggregate> => {
+  return await v1OkData<ReviewAggregate>(`/reviews/users/${userId}/aggregate`, { method: 'GET' });
+};
+
+export const canReviewGig = async (gigId: string): Promise<{
+  allowed: boolean;
+  reason?: string;
+  reviewee_id?: string;
+  role?: 'trader' | 'seeker';
+}> => {
+  return await v1OkData(`/reviews/can-review?gig_id=${encodeURIComponent(gigId)}`, { method: 'GET' });
+};
+
+export const submitReview = async (input: {
+  gig_id: string;
+  reviewee_id: string;
+  rating: number;
+  comment?: string;
+}): Promise<ReviewItem> => {
+  return await v1OkData<ReviewItem>('/reviews', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 };
 
 export const fetchMyGigs = async (): Promise<Gig[]> => {
@@ -535,6 +652,23 @@ export const acceptApplicant = async (gigId: string, applicationId: string) =>
     method: 'POST',
     body: '{}',
   });
+
+// ─── Public Gigs (no auth required) ────────────────────────
+export const fetchPublicGigs = async (params: {
+  search?: string;
+  location?: string;
+  limit?: number;
+} = {}): Promise<Gig[]> => {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set('skill', params.search);
+  if (params.location) qs.set('location', params.location);
+  qs.set('limit', String(params.limit ?? 24));
+  const list = await v1OkData<Record<string, unknown>[]>(`/gigs?${qs.toString()}`, {
+    method: 'GET',
+    auth: false,
+  });
+  return Array.isArray(list) ? list.map(mapBackendGigToGig) : [];
+};
 
 // ─── Squad / Payments ──────────────────────────────────────
 export const squadDeposit = async (amountNaira: number, callbackUrl: string) =>
@@ -1128,6 +1262,11 @@ export const jobSeekerAPI = {
       timestamp: t.timestamp,
       reference: t.reference,
       description: t.description,
+      purpose: t.purpose,
+      senderName: t.senderName ?? null,
+      receiverName: t.receiverName ?? null,
+      feedLabel: t.feedLabel,
+      status: t.status,
     }));
   },
 

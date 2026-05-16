@@ -446,6 +446,13 @@ class Gig(Base):
     skill_required: Mapped[str] = mapped_column(String(255))
 
     location: Mapped[str] = mapped_column(String(255))
+    # Street-level / on-site address used by job seekers on the day; surfaced in
+    # the in-app job note and copied into the trader-contact reminder when the
+    # seeker arrives.
+    direct_location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # When the trader expects the seeker to start (used for punctuality
+    # signals in pulse-score calculation and for the "arrived on time" check).
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     economic_context: Mapped[EconomicContext] = mapped_column(
         SQLEnum(EconomicContext),
@@ -679,6 +686,32 @@ class AjoTransaction(Base):
     __table_args__ = (
         Index("ix_ajo_transactions_ajo_id", "ajo_id"),
         Index("ix_ajo_transactions_user_id", "user_id"),
+    )
+
+
+class Review(Base):
+    """Bi-directional rating + review between trader and seeker for a completed gig.
+
+    Visible to all users on the platform. One row per (reviewer, reviewee, gig)
+    so each side can leave one review per gig.
+    """
+    __tablename__ = "reviews"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    reviewer_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
+    reviewee_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
+    gig_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("gigs.id", ondelete="SET NULL"), nullable=True)
+    rating: Mapped[int] = mapped_column(Integer)  # 1-5
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_role: Mapped[str] = mapped_column(String(20))  # "trader" or "seeker" — speeds up filtering
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("reviewer_id", "reviewee_id", "gig_id", name="uq_review_per_gig"),
+        Index("ix_reviews_reviewee_id", "reviewee_id"),
+        Index("ix_reviews_reviewer_id", "reviewer_id"),
+        Index("ix_reviews_gig_id", "gig_id"),
+        CheckConstraint("rating >= 1 AND rating <= 5"),
     )
 
 

@@ -37,6 +37,8 @@ class GigService:
             skill_required=payload.get("skill_required", ""),
             payment_period=payload.get("payment_period"),
             location=payload.get("location", ""),
+            direct_location=payload.get("direct_location"),
+            scheduled_at=payload.get("scheduled_at"),
             amount=amount_kobo,
             status=GigStatus.OPEN,
         )

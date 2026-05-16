@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from './components/Button';
 import { Card, CardHeader, CardTitle, CardContent } from './components/Card';
+import { PublicJobs } from './components/PublicJobs';
 import HeroImg from "../../assets/hero.png"
 import { GoBriefcase } from "react-icons/go";
 import { CiShop } from "react-icons/ci";
@@ -120,6 +121,9 @@ export const LandingPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* Public job search — visible to logged-out visitors as well */}
+      <PublicJobs />
 
       {/* Process - How it works */}
       <section className='grid grid-cols-1 md:grid-cols-[40%_60%] gap-12 md:gap-5 py-14 px-6 md:px-0 md:max-w-6xl mx-auto'>

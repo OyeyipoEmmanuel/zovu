@@ -14,7 +14,7 @@ from src.core.redis_client import get_redis_cache
 # pyrefly: ignore [missing-import]
 from src.dependencies import get_current_user
 # pyrefly: ignore [missing-import]
-from src.models import User, Transaction
+from src.models import User, Transaction, Ajo, Gig, TransactionType
 # pyrefly: ignore [missing-import]
 from src.services.squad import SquadService
 # pyrefly: ignore [missing-import]
@@ -40,6 +40,180 @@ import uuid
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+
+# ── Enrichment helpers ──────────────────────────────────────────────
+#
+# These resolve the human-readable counterparty + purpose for a transaction
+# so the trader/seeker frontends can display rows like:
+#   "You contributed ₦5,000 to Ajo 'Lagos Daily Savers'"
+#   "Lekan paid you ₦12,000 for gig 'Help with deliveries'"
+# without having to follow extra references from the client.
+#
+# Resolution order:
+#   1. sender/receiver user rows → display name
+#   2. tx_metadata.purpose + ajo_id/gig_id → contextual label
+#   3. transaction_type fallback (e.g. "Loan disbursement")
+
+
+def _user_label(u: User | None) -> str | None:
+    """Render a public-safe display name for a counterparty."""
+    if u is None:
+        return None
+    candidate = (
+        (u.full_name or "").strip()
+        or f"{(u.first_name or '').strip()} {(u.last_name or '').strip()}".strip()
+        or u.business_name
+        or u.company_name
+        or u.email
+    )
+    return candidate or None
+
+
+async def _build_enrichment_caches(
+    db: AsyncSession,
+    transactions: list[Transaction],
+) -> tuple[dict[str, User], dict[str, Ajo], dict[str, Gig]]:
+    """Bulk-load the related users / ajos / gigs in three queries instead of N+1."""
+    user_ids: set[str] = set()
+    ajo_ids: set[str] = set()
+    gig_ids: set[str] = set()
+    for t in transactions:
+        if t.sender_id:
+            user_ids.add(t.sender_id)
+        if t.receiver_id:
+            user_ids.add(t.receiver_id)
+        meta = t.tx_metadata or {}
+        if isinstance(meta, dict):
+            if meta.get("ajo_id"):
+                ajo_ids.add(str(meta["ajo_id"]))
+            if meta.get("gig_id"):
+                gig_ids.add(str(meta["gig_id"]))
+
+    user_cache: dict[str, User] = {}
+    if user_ids:
+        rows = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+        user_cache = {u.id: u for u in rows}
+
+    ajo_cache: dict[str, Ajo] = {}
+    if ajo_ids:
+        rows = (await db.execute(select(Ajo).where(Ajo.id.in_(ajo_ids)))).scalars().all()
+        ajo_cache = {a.id: a for a in rows}
+
+    gig_cache: dict[str, Gig] = {}
+    if gig_ids:
+        rows = (await db.execute(select(Gig).where(Gig.id.in_(gig_ids)))).scalars().all()
+        gig_cache = {g.id: g for g in rows}
+
+    return user_cache, ajo_cache, gig_cache
+
+
+def _purpose_for(
+    t: Transaction,
+    ajo_cache: dict[str, Ajo],
+    gig_cache: dict[str, Gig],
+) -> str:
+    """Best-effort human label for what the transaction was for."""
+    meta = t.tx_metadata or {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    meta_purpose = (meta.get("purpose") or "").strip()
+    ajo_id = meta.get("ajo_id")
+    gig_id = meta.get("gig_id")
+
+    # Prefer the most specific label we can build.
+    ttype = t.transaction_type
+    if ttype == TransactionType.AJO_CONTRIBUTION:
+        ajo = ajo_cache.get(str(ajo_id)) if ajo_id else None
+        ajo_name = (ajo.name if ajo else None) or meta.get("ajo_name")
+        return f"Contribution to Ajo '{ajo_name}'" if ajo_name else "Ajo contribution"
+    if ttype == TransactionType.AJO_PAYOUT:
+        ajo = ajo_cache.get(str(ajo_id)) if ajo_id else None
+        ajo_name = (ajo.name if ajo else None) or meta.get("ajo_name")
+        return f"Payout from Ajo '{ajo_name}'" if ajo_name else "Ajo payout"
+    if ttype == TransactionType.LOAN_DISBURSEMENT:
+        return "Loan disbursement"
+    if ttype == TransactionType.LOAN_REPAYMENT:
+        return "Loan repayment"
+    if ttype == TransactionType.CREDIT_DEPOSIT:
+        if meta_purpose == "squad_wallet_deposit":
+            return "Wallet top-up"
+        return "Deposit"
+    if ttype == TransactionType.CREDIT_WITHDRAWAL:
+        if meta_purpose == "trader_to_seeker_payout":
+            gig = gig_cache.get(str(gig_id)) if gig_id else None
+            if gig and gig.title:
+                return f"Gig payment — '{gig.title}'"
+            return "Gig payment"
+        if meta_purpose == "external_payout":
+            return "Bank transfer (external)"
+        return "Withdrawal"
+
+    return meta_purpose.replace("_", " ").capitalize() if meta_purpose else "Transaction"
+
+
+def _enrich_transaction(
+    t: Transaction,
+    viewer: User,
+    user_cache: dict[str, User],
+    ajo_cache: dict[str, Ajo],
+    gig_cache: dict[str, Gig],
+) -> dict:
+    """Build a fully-resolved row for the given transaction from the viewer's POV."""
+    sender = user_cache.get(t.sender_id) if t.sender_id else None
+    receiver = user_cache.get(t.receiver_id) if t.receiver_id else None
+
+    sender_name = _user_label(sender) or ("ZOVU system" if t.sender_id is None else None)
+    receiver_name = _user_label(receiver) or ("ZOVU system" if t.receiver_id is None else None)
+
+    # Build the counterparty (the side that isn't the viewer).
+    if t.sender_id == viewer.id:
+        counterparty = receiver
+        counterparty_name = receiver_name
+    elif t.receiver_id == viewer.id:
+        counterparty = sender
+        counterparty_name = sender_name
+    else:
+        counterparty = None
+        counterparty_name = None
+
+    direction = "inflow" if t.direction == "credit" else "outflow"
+    amount_display = format_naira(t.amount or 0)
+    purpose = _purpose_for(t, ajo_cache, gig_cache)
+
+    if direction == "inflow":
+        feed_label = f"Received {amount_display}"
+        if counterparty_name:
+            feed_label += f" from {counterparty_name}"
+        feed_label += f" — {purpose}"
+    else:
+        feed_label = f"Sent {amount_display}"
+        if counterparty_name:
+            feed_label += f" to {counterparty_name}"
+        feed_label += f" — {purpose}"
+
+    return {
+        "id": t.id,
+        "sender_id": t.sender_id,
+        "sender_name": sender_name,
+        "receiver_id": t.receiver_id,
+        "receiver_name": receiver_name,
+        "counterparty_id": counterparty.id if counterparty else None,
+        "counterparty_display": counterparty_name,
+        "transaction_type": t.transaction_type,
+        "purpose": purpose,
+        "amount": t.amount,
+        "amount_display": amount_display,
+        "status": t.status,
+        "squad_reference": t.squad_reference,
+        "loan_id": t.loan_id,
+        "direction": direction,
+        "masked_account": mask_account_number(viewer.squad_account_number or ""),
+        "feed_label": feed_label,
+        "metadata": t.tx_metadata,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+    }
 
 
 @router.get(
@@ -100,15 +274,15 @@ async def list_transactions(
     
     # Fetch limit + 1 to determine if more results exist
     query = query.limit(limit + 1)
-    
+
     result = await db.execute(query)
     transactions = result.scalars().all()
-    
+
     # Check if more results exist
     has_more = len(transactions) > limit
     if has_more:
         transactions = transactions[:limit]
-    
+
     # Generate next cursor
     next_cursor = None
     if has_more and transactions:
@@ -120,34 +294,14 @@ async def list_transactions(
         next_cursor = base64.b64encode(
             json.dumps(cursor_data).encode()
         ).decode()
-    
-    def _enrich(t) -> dict:
-        direction = "inflow" if t.direction == "credit" else "outflow"
-        amount_display = format_naira(t.amount or 0)
-        feed_label = (
-            f"Received {amount_display} into your ZOVU virtual account"
-            if direction == "inflow"
-            else f"Sent {amount_display} from your ZOVU virtual account"
-        )
-        return {
-            "id": t.id,
-            "sender_id": t.sender_id,
-            "receiver_id": t.receiver_id,
-            "transaction_type": t.transaction_type,
-            "amount": t.amount,
-            "amount_display": amount_display,
-            "status": t.status,
-            "squad_reference": t.squad_reference,
-            "loan_id": t.loan_id,
-            "direction": direction,
-            "masked_account": mask_account_number(user.squad_account_number or ""),
-            "feed_label": feed_label,
-            "counterparty_display": None,
-            "created_at": t.created_at.isoformat(),
-        }
+
+    user_cache, ajo_cache, gig_cache = await _build_enrichment_caches(db, transactions)
 
     payload = {
-        "items": [_enrich(t) for t in transactions],
+        "items": [
+            _enrich_transaction(t, user, user_cache, ajo_cache, gig_cache)
+            for t in transactions
+        ],
         "total": len(transactions),
         "cursor": next_cursor,
         "has_more": has_more,
@@ -183,36 +337,14 @@ async def get_transaction(
     )
     result = await db.execute(query)
     transaction = result.scalar_one_or_none()
-    
+
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    
-    direction = "inflow" if transaction.direction == "credit" else "outflow"
-    amount_display = format_naira(transaction.amount or 0)
-    feed_label = (
-        f"Received {amount_display} into your ZOVU virtual account"
-        if direction == "inflow"
-        else f"Sent {amount_display} from your ZOVU virtual account"
-    )
 
-    return {
-        "id": transaction.id,
-        "sender_id": transaction.sender_id,
-        "receiver_id": transaction.receiver_id,
-        "transaction_type": transaction.transaction_type,
-        "amount": transaction.amount,
-        "amount_display": amount_display,
-        "status": transaction.status,
-        "squad_reference": transaction.squad_reference,
-        "loan_id": transaction.loan_id,
-        "direction": direction,
-        "masked_account": mask_account_number(user.squad_account_number or ""),
-        "feed_label": feed_label,
-        "counterparty_display": None,
-        "metadata": transaction.tx_metadata,
-        "created_at": transaction.created_at.isoformat(),
-        "updated_at": transaction.updated_at.isoformat(),
-    }
+    user_cache, ajo_cache, gig_cache = await _build_enrichment_caches(db, [transaction])
+    enriched = _enrich_transaction(transaction, user, user_cache, ajo_cache, gig_cache)
+    enriched["updated_at"] = transaction.updated_at.isoformat() if transaction.updated_at else None
+    return enriched
 
 # ------------------------------------------------------------------ #
 #  Payment schemas                                                     #

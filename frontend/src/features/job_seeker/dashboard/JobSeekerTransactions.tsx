@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { jobSeekerAPI, fetchUserProfile, type UserProfile } from '../../../lib/api';
 import type { JSTransaction } from '../../../lib/mockData';
 import { ComplaintModal } from '../../shared/ComplaintModal';
+import { AlertTriangle, ArrowDown, ArrowUp, Copy, Check } from 'lucide-react';
 
 const formatTime = (timestamp: string) => {
   const diff = Date.now() - new Date(timestamp).getTime();
@@ -77,8 +78,20 @@ export const JobSeekerTransactions: React.FC = () => {
         <p className="font-dm text-[12px] text-zovu-text uppercase tracking-wider mb-1">Squad Virtual Account</p>
         <div className="flex items-center gap-3 mb-3">
           <span className="font-syne text-[20px] font-bold text-zovu-text-light tracking-wider">{vaNumber}</span>
-          <button onClick={handleCopyAcct} className="text-zovu-text hover:text-[#1A6B4A] transition-colors font-dm text-[12px]">
-            {copiedAcct ? '✓ Copied' : '📋 Copy'}
+          <button
+            type="button"
+            onClick={handleCopyAcct}
+            className="text-zovu-text hover:text-[#1A6B4A] transition-colors font-dm text-[12px] flex items-center gap-1"
+          >
+            {copiedAcct ? (
+              <>
+                <Check size={12} /> Copied
+              </>
+            ) : (
+              <>
+                <Copy size={12} /> Copy
+              </>
+            )}
           </button>
         </div>
         <p className="font-dm text-[13px] text-zovu-text mb-2">{vaBank}</p>
@@ -125,39 +138,60 @@ export const JobSeekerTransactions: React.FC = () => {
         </div>
       ) : (
         <div className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] divide-y divide-zovu-border/50">
-          {transactions.map(txn => (
-            <div key={txn.id} className="flex items-center justify-between p-4 hover:bg-zovu-surface-2/30 transition-colors">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-[16px] ${txn.type === 'inflow' ? 'bg-[#1A6B4A]/10 text-[#1A6B4A]' : 'bg-[#EF4444]/10 text-[#EF4444]'}`}>
-                  {txn.type === 'inflow' ? '↓' : '↑'}
-                </div>
-                <div>
-                  <p className="font-dm text-[14px] text-zovu-text-light font-medium">{txn.counterparty}</p>
-                  <div className="flex items-center gap-2">
-                    <span className="font-dm text-[11px] text-zovu-text">{formatTime(txn.timestamp)}</span>
-                    <span className="text-zovu-border">·</span>
-                    <button onClick={() => handleCopyRef(txn.reference)} className="font-dm text-[11px] text-zovu-text hover:text-[#1A6B4A] transition-colors">
-                      {copiedRef === txn.reference ? '✓ Copied' : txn.reference}
-                    </button>
+          {transactions.map(txn => {
+            // Phase-1 enrichment: backend now provides purpose, senderName,
+            // receiverName. Surface all three so the row clearly answers
+            // "what was this, from whom, to whom".
+            const purpose = txn.purpose || txn.description;
+            const senderName = txn.senderName || 'ZOVU system';
+            const receiverName = txn.receiverName || 'ZOVU system';
+            return (
+              <div key={txn.id} className="flex items-center justify-between p-4 hover:bg-zovu-surface-2/30 transition-colors">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${txn.type === 'inflow' ? 'bg-[#1A6B4A]/10 text-[#1A6B4A]' : 'bg-[#EF4444]/10 text-[#EF4444]'}`}>
+                    {txn.type === 'inflow' ? <ArrowDown size={16} /> : <ArrowUp size={16} />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-dm text-[14px] text-zovu-text-light font-medium truncate">{txn.counterparty}</p>
+                    <p className="font-dm text-[12px] text-zovu-text mt-0.5 truncate">{purpose}</p>
+                    <p className="font-dm text-[11px] text-zovu-text/70 mt-0.5 truncate">
+                      <span className="text-zovu-text/50">From</span> {senderName}{' '}
+                      <span className="text-zovu-text/50">→</span> {receiverName}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="font-dm text-[11px] text-zovu-text">{formatTime(txn.timestamp)}</span>
+                      <span className="text-zovu-border">·</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyRef(txn.reference)}
+                        className="font-dm text-[11px] text-zovu-text hover:text-[#1A6B4A] transition-colors inline-flex items-center gap-1"
+                      >
+                        {copiedRef === txn.reference ? (
+                          <><Check size={10} /> Copied</>
+                        ) : (
+                          txn.reference
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={`font-syne text-[16px] font-bold ${txn.type === 'inflow' ? 'text-[#1A6B4A]' : 'text-[#EF4444]'}`}>
+                    {txn.type === 'inflow' ? '+' : '-'}₦{txn.amount.toLocaleString('en-NG')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setComplaintFor(txn)}
+                    title="Report an issue"
+                    aria-label="Report an issue"
+                    className="p-2 rounded-md text-zovu-text hover:text-[#F4A11D] hover:bg-zovu-surface-2/60 transition-colors"
+                  >
+                    <AlertTriangle size={16} />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className={`font-syne text-[16px] font-bold ${txn.type === 'inflow' ? 'text-[#1A6B4A]' : 'text-[#EF4444]'}`}>
-                  {txn.type === 'inflow' ? '+' : '-'}₦{txn.amount.toLocaleString('en-NG')}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setComplaintFor(txn)}
-                  title="Report an issue"
-                  aria-label="Report an issue"
-                  className="p-2 rounded-md text-zovu-text hover:text-[#F4A11D] hover:bg-zovu-surface-2/60 transition-colors"
-                >
-                  ⚠️
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

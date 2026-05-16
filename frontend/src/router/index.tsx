@@ -45,8 +45,20 @@ import ComplaintDetail from '../features/admin/screens/ComplaintDetail';
 import FraudManagement from '../features/admin/screens/FraudManagement';
 import MetricsDashboard from '../features/admin/screens/MetricsDashboard';
 import PartnershipManagement from '../features/admin/screens/PartnershipManagement';
+import PartnersManagement from '../features/admin/screens/PartnersManagement';
 import AuditLog from '../features/admin/screens/AuditLog';
 import AjoManagement from '../features/admin/screens/AjoManagement';
+import {
+  Home as HomeIcon,
+  Briefcase,
+  ShoppingBag,
+  Coins as CoinsIcon,
+  Wallet,
+  Activity,
+  ClipboardList,
+  Bell,
+  type LucideIcon,
+} from 'lucide-react';
 
 const PartnerProtectedRoute = () => {
   const { user } = useAuthStore();
@@ -88,15 +100,15 @@ export const PartnerRoutes = (
 
 // ─── Job Seeker Sidebar / Bottom Nav ────────────────────────
 
-const jsNavItems = [
-  { to: '/dashboard/job-seeker', label: 'Home', icon: '🏠' },
-  { to: '/dashboard/job-seeker/jobs', label: 'Jobs', icon: '💼' },
-  { to: '/dashboard/job-seeker/services', label: 'Services', icon: '🛍️' },
-  { to: '/dashboard/job-seeker/ajo', label: 'Ajo', icon: '🪙' },
-  { to: '/dashboard/job-seeker/transactions', label: 'Transactions', icon: '💳' },
-  { to: '/dashboard/job-seeker/pulse', label: 'Pulse Score', icon: '📊' },
-  { to: '/dashboard/job-seeker/gig-history', label: 'Gig History', icon: '📋' },
-  { to: '/dashboard/job-seeker/notifications', label: 'Notifications', icon: '🔔' },
+const jsNavItems: { to: string; label: string; Icon: LucideIcon }[] = [
+  { to: '/dashboard/job-seeker', label: 'Home', Icon: HomeIcon },
+  { to: '/dashboard/job-seeker/jobs', label: 'Jobs', Icon: Briefcase },
+  { to: '/dashboard/job-seeker/services', label: 'Services', Icon: ShoppingBag },
+  { to: '/dashboard/job-seeker/ajo', label: 'Ajo', Icon: CoinsIcon },
+  { to: '/dashboard/job-seeker/transactions', label: 'Transactions', Icon: Wallet },
+  { to: '/dashboard/job-seeker/pulse', label: 'Pulse Score', Icon: Activity },
+  { to: '/dashboard/job-seeker/gig-history', label: 'Gig History', Icon: ClipboardList },
+  { to: '/dashboard/job-seeker/notifications', label: 'Notifications', Icon: Bell },
 ];
 
 const JobSeekerSidebar = () => {
@@ -107,6 +119,7 @@ const JobSeekerSidebar = () => {
       <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
         {jsNavItems.map(item => {
           const isActive = location.pathname === item.to || (item.to !== '/dashboard/job-seeker' && location.pathname.startsWith(item.to));
+          const Icon = item.Icon;
           return (
             <Link
               key={item.to}
@@ -117,7 +130,7 @@ const JobSeekerSidebar = () => {
                   : 'text-[#F5F5F5] hover:bg-[#2A2A2A]/50'
               }`}
             >
-              <span className="text-[16px]">{item.icon}</span>
+              <Icon size={18} strokeWidth={1.75} />
               {item.label}
             </Link>
           );
@@ -136,6 +149,7 @@ const JobSeekerBottomNav = () => {
     <div className="fixed bottom-0 left-0 right-0 bg-[#161616] border-t border-[#2A2A2A] flex md:hidden overflow-x-auto no-scrollbar items-center py-2 px-1 z-50 gap-1">
       {jsNavItems.map(item => {
         const isActive = location.pathname === item.to || (item.to !== '/dashboard/job-seeker' && location.pathname.startsWith(item.to));
+        const Icon = item.Icon;
         return (
           <Link
             key={item.to}
@@ -144,7 +158,7 @@ const JobSeekerBottomNav = () => {
               isActive ? 'text-[#1A6B4A]' : 'text-[#A0A0A0]'
             }`}
           >
-            <span className="text-[18px]">{item.icon}</span>
+            <Icon size={18} strokeWidth={1.75} />
             <span className="font-dm text-[9px]">{item.label}</span>
           </Link>
         );
@@ -537,6 +551,7 @@ export const AdminRoutes = (
     <Route path="/admin/fraud" element={<FraudManagement />} />
     <Route path="/admin/metrics" element={<MetricsDashboard />} />
     <Route path="/admin/partnerships" element={<PartnershipManagement />} />
+    <Route path="/admin/partners" element={<PartnersManagement />} />
     <Route path="/admin/ajo" element={<AjoManagement />} />
     <Route path="/admin/audit" element={<AuditLog />} />
   </Route>

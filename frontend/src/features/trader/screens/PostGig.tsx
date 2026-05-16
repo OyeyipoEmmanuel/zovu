@@ -18,11 +18,26 @@ export const PostGig: React.FC = () => {
   const [pay, setPay] = useState<number | ''>('');
   const [payPeriod, setPayPeriod] = useState<typeof PAY_PERIODS[number]>('Per Day');
   const [location, setLocation] = useState('');
+  /** Street/site address — gets surfaced in the seeker's "call trader on arrival" note. */
+  const [directLocation, setDirectLocation] = useState('');
+  /** Date the seeker should show up. ISO yyyy-mm-dd from <input type="date">. */
+  const [scheduledDate, setScheduledDate] = useState('');
+  /** Time of day — HH:mm string from <input type="time">. */
+  const [scheduledTime, setScheduledTime] = useState('');
   const [urgency, setUrgency] = useState<typeof URGENCY[number]>('Normal');
   const [languages, setLanguages] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /** Combine date + time into a local ISO timestamp the backend can parse. */
+  const buildScheduledAt = (): string | undefined => {
+    if (!scheduledDate) return undefined;
+    const timePart = scheduledTime || '09:00';
+    const local = new Date(`${scheduledDate}T${timePart}:00`);
+    if (Number.isNaN(local.getTime())) return undefined;
+    return local.toISOString();
+  };
 
   const effectivePay = typeof pay === 'number' ? pay + (urgency === 'Urgent' ? 500 : 0) : 0;
 
@@ -56,6 +71,8 @@ export const PostGig: React.FC = () => {
         pay: effectivePay,
         payPeriod,
         location,
+        directLocation: directLocation.trim() || undefined,
+        scheduledAt: buildScheduledAt(),
         urgency,
         languages,
       });
@@ -89,6 +106,9 @@ export const PostGig: React.FC = () => {
             setPay('');
             setPayPeriod('Per Day');
             setLocation('');
+            setDirectLocation('');
+            setScheduledDate('');
+            setScheduledTime('');
             setUrgency('Normal');
             setLanguages([]);
           }}
@@ -199,6 +219,52 @@ export const PostGig: React.FC = () => {
                 <option key={lga} value={lga}>{lga}</option>
               ))}
             </select>
+          </div>
+
+          {/* Direct location (street / on-site) */}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="postgig-direct-location" className="font-dm text-[13px] text-zovu-text-light font-medium">
+              Direct location / address
+            </label>
+            <input
+              id="postgig-direct-location"
+              type="text"
+              value={directLocation}
+              onChange={(e) => setDirectLocation(e.target.value)}
+              placeholder="e.g. 14 Awolowo Way, Ikeja — shop 3B"
+              className="w-full bg-transparent border border-zovu-border rounded-[8px] font-dm text-[14px] text-zovu-text-light px-4 py-3 outline-none focus:border-zovu-primary transition-colors duration-200 placeholder:text-zovu-text/50"
+            />
+            <p className="font-dm text-[11px] text-zovu-text">
+              Shown to the seeker after they apply. They will be told to call you once they arrive.
+            </p>
+          </div>
+
+          {/* Date + Time */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="postgig-date" className="font-dm text-[13px] text-zovu-text-light font-medium">
+                Date
+              </label>
+              <input
+                id="postgig-date"
+                type="date"
+                value={scheduledDate}
+                onChange={(e) => setScheduledDate(e.target.value)}
+                className="w-full bg-transparent border border-zovu-border rounded-[8px] font-dm text-[14px] text-zovu-text-light px-4 py-3 outline-none focus:border-zovu-primary transition-colors duration-200"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="postgig-time" className="font-dm text-[13px] text-zovu-text-light font-medium">
+                Time
+              </label>
+              <input
+                id="postgig-time"
+                type="time"
+                value={scheduledTime}
+                onChange={(e) => setScheduledTime(e.target.value)}
+                className="w-full bg-transparent border border-zovu-border rounded-[8px] font-dm text-[14px] text-zovu-text-light px-4 py-3 outline-none focus:border-zovu-primary transition-colors duration-200"
+              />
+            </div>
           </div>
 
           {/* Urgency */}

@@ -1,6 +1,7 @@
 """
 Gigs router — CRUD, apply, accept, complete endpoints.
 """
+from datetime import datetime
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -27,6 +28,8 @@ def _serialize_gig(gig) -> dict:
         "skill_required": gig.skill_required,
         "payment_period": gig.payment_period,
         "location": gig.location,
+        "direct_location": getattr(gig, "direct_location", None),
+        "scheduled_at": gig.scheduled_at.isoformat() if getattr(gig, "scheduled_at", None) else None,
         "amount": gig.amount,
         "amount_display": format_naira(gig.amount or 0),
         "status": gig.status,
@@ -56,6 +59,12 @@ class CreateGigRequest(BaseModel):
     description: str | None = None
     skill_required: str
     location: str
+    # Optional direct/on-site address — used in the in-app job note that asks
+    # the seeker to call the trader on arrival.
+    direct_location: str | None = None
+    # Optional scheduled start time. When supplied, used in pulse-score
+    # punctuality signals and job-completion tracking.
+    scheduled_at: datetime | None = None
     amount: int
     payment_period: str | None = None
 

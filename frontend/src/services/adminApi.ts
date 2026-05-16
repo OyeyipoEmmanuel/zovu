@@ -96,6 +96,13 @@ export const adminPartnershipsAPI = {
 export const adminPartnerAPI = {
   listPending: () => request("/admin/partners/pending"),
 
+  /** Newer endpoint — returns every lender account in the system,
+   *  filterable by status (pending | approved | banned). */
+  listAll: (status?: "pending" | "approved" | "banned") =>
+    request("/admin/partners", {
+      params: status ? { status } : undefined,
+    }),
+
   approve: (userId: string) =>
     request(`/admin/partners/${userId}/approve`, { method: "POST" }),
 

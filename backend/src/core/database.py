@@ -125,6 +125,13 @@ def _apply_schema_patches(connection):
         if "deleted_at" not in user_cols:
             patches.append("ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP NULL")
 
+    if "gigs" in inspector.get_table_names():
+        gig_cols = {col["name"] for col in inspector.get_columns("gigs")}
+        if "direct_location" not in gig_cols:
+            patches.append("ALTER TABLE gigs ADD COLUMN direct_location VARCHAR(500) NULL")
+        if "scheduled_at" not in gig_cols:
+            patches.append("ALTER TABLE gigs ADD COLUMN scheduled_at TIMESTAMP NULL")
+
     for sql in patches:
         try:
             connection.execute(text(sql))

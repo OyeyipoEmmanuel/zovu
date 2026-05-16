@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useJobSeekerStore } from '../../../stores/jobSeekerStore';
 import { jobSeekerAPI } from '../../../lib/api';
 import type { JobMatch } from '../../../lib/mockData';
+import { RatingBadge } from '../../shared/RatingBadge';
+import { Calendar, MapPin } from 'lucide-react';
 
 const getMatchBadgeColor = (pct: number) => {
   if (pct >= 90) return 'bg-[#1A6B4A]/10 text-[#1A6B4A] border-[#1A6B4A]/20';
@@ -73,7 +75,34 @@ export const JobSeekerJobs: React.FC = () => {
               <h3 className="font-syne text-[17px] font-bold text-zovu-text-light">{job.title}</h3>
               {job.urgent && <span className="px-2 py-0.5 rounded bg-[#EF4444] text-white text-[10px] font-dm font-bold uppercase">Urgent</span>}
             </div>
-            <p className="font-dm text-[13px] text-zovu-text mt-1">{job.employer} · {job.lga}</p>
+            <p className="font-dm text-[13px] text-zovu-text mt-1 flex items-center gap-2 flex-wrap">
+              <span>{job.employer}</span>
+              {/* Trader rating shown beside their name on every job-seeker job card. */}
+              <RatingBadge userId={job.trader_id} />
+              <span className="text-zovu-text/50">·</span>
+              <span>{job.lga}</span>
+            </p>
+            {(job.direct_location || job.scheduled_at) && (
+              <div className="flex flex-wrap gap-3 mt-2 font-dm text-[11px] text-zovu-text">
+                {job.direct_location && (
+                  <span className="inline-flex items-center gap-1">
+                    <MapPin size={11} />
+                    {job.direct_location}
+                  </span>
+                )}
+                {job.scheduled_at && (
+                  <span className="inline-flex items-center gap-1">
+                    <Calendar size={11} />
+                    {new Date(job.scheduled_at).toLocaleString('en-GB', {
+                      day: '2-digit',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <span className="font-syne text-[18px] font-bold text-[#1A6B4A]">₦{job.pay.toLocaleString('en-NG')}<span className="text-[12px] font-dm text-zovu-text font-normal">/{job.pay_period}</span></span>

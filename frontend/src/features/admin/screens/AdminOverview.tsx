@@ -5,6 +5,7 @@ import { adminMetricsAPI, adminAuditAPI } from '../../../services/adminApi';
 import { StatCard } from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
 import { Link } from 'react-router-dom';
+import { ArrowRight } from 'lucide-react';
 
 const AdminOverview: React.FC = () => {
   const { data: metricsData, isLoading: metricsLoading } = useQuery({
@@ -197,7 +198,7 @@ const AlertItem = ({ color, count, label, link }: any) => {
         </div>
         <span className="font-dm text-[14px] text-[#F5F5F5]">{label}</span>
       </div>
-      <span className="text-[#A0A0A0]">→</span>
+      <ArrowRight size={16} className="text-[#A0A0A0]" />
     </Link>
   );
 };
