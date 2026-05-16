@@ -6,8 +6,12 @@ In production mode: real email sent, OTP never logged.
 import asyncio
 import smtplib
 import ssl
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from uuid import UUID
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 import structlog
 
@@ -58,6 +62,103 @@ class EmailService:
             return
 
         await self._send(to_email, subject, body)
+
+    async def send_receipt(
+        self,
+        user_id: UUID | str,
+        transaction_id: UUID | str,
+        db: AsyncSession,
+    ) -> None:
+        """
+        Fetch the user + the full transaction detail and send a receipt email.
+
+        Non-blocking on failure: any exception is logged and swallowed so the
+        Squad webhook handler (or any other caller) can never be derailed by an
+        email outage.
+
+        Email content:
+          - Subject: "ZOVU Receipt – ₦{amount} {type_label}"
+          - HTML body: ZOVU header, transaction details table
+            (type, amount, counterparty, reference, timestamp),
+            current Pulse Score, support link at bottom.
+        """
+        try:
+            # Lazy imports — avoid module-level cycles between services/models.
+            from src.models import User, Transaction, Ajo, Gig
+            from src.routers.transactions import (
+                _counterparty_for,
+                _type_label,
+                _build_enrichment_caches,
+            )
+            from src.core.utils import format_naira
+
+            user = await db.scalar(select(User).where(User.id == str(user_id)))
+            if user is None or not user.email:
+                logger.warning(
+                    "email_receipt_skipped_no_user_or_email",
+                    user_id=str(user_id),
+                    transaction_id=str(transaction_id),
+                )
+                return
+
+            tx = await db.scalar(
+                select(Transaction).where(Transaction.id == str(transaction_id))
+            )
+            if tx is None:
+                logger.warning(
+                    "email_receipt_skipped_tx_not_found",
+                    user_id=str(user_id),
+                    transaction_id=str(transaction_id),
+                )
+                return
+
+            # Re-use the router's enrichment helpers so the wording stays
+            # consistent with what the user sees in-app.
+            user_cache, ajo_cache, gig_cache = await _build_enrichment_caches(db, [tx])
+            counterparty_display = _counterparty_for(tx, user, user_cache, ajo_cache)
+            type_label = _type_label(tx)
+            amount_display = format_naira(int(tx.amount or 0))
+
+            reference = tx.squad_reference or tx.id
+            created_at = tx.created_at or datetime.now(timezone.utc)
+            timestamp = created_at.strftime("%d %b %Y, %H:%M UTC")
+            display_name = (
+                (user.full_name or "").strip()
+                or f"{(user.first_name or '').strip()} {(user.last_name or '').strip()}".strip()
+                or user.business_name
+                or user.company_name
+                or user.email
+            )
+
+            subject = f"ZOVU Receipt – {amount_display} {type_label}"
+            body = self._receipt_html(
+                user_name=display_name or "there",
+                type_label=type_label,
+                amount_display=amount_display,
+                counterparty=counterparty_display or "ZOVU System",
+                reference=reference,
+                timestamp=timestamp,
+                pulse_score=int(user.pulse_score or 0),
+            )
+
+            if settings.ENVIRONMENT != "production":
+                logger.info(
+                    "dev_receipt_email",
+                    to=user.email,
+                    transaction_id=str(tx.id),
+                    note="NOT sent — dev mode",
+                )
+                return
+
+            await self._send(user.email, subject, body)
+        except Exception as exc:
+            # Email outage MUST NEVER break the calling Squad webhook flow.
+            logger.error(
+                "email_receipt_failed",
+                user_id=str(user_id),
+                transaction_id=str(transaction_id),
+                error=str(exc),
+            )
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #
@@ -150,6 +251,71 @@ class EmailService:
       This code expires in <strong>10 minutes</strong>. Do not share it with anyone.
     </p>
     <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+    <p style="color:#aaa;font-size:12px;text-align:center;">
+      &copy; 2025 Zovu. All rights reserved.
+    </p>
+  </div>
+</body>
+</html>"""
+
+    @staticmethod
+    def _receipt_html(
+        user_name: str,
+        type_label: str,
+        amount_display: str,
+        counterparty: str,
+        reference: str,
+        timestamp: str,
+        pulse_score: int,
+    ) -> str:
+        return f"""
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:20px;">
+  <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
+    <h1 style="color:#1a1a2e;font-size:22px;margin-bottom:4px;">Zovu</h1>
+    <p style="color:#555;margin-top:0;">Transaction Receipt</p>
+    <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+    <p style="font-size:16px;">Hi {user_name},</p>
+    <p style="color:#555;">Here is your receipt for the transaction below.</p>
+    <div style="background:#f0f4ff;border-radius:6px;padding:16px;margin:16px 0;text-align:center;">
+      <p style="margin:0;font-size:13px;color:#555;">{type_label}</p>
+      <p style="margin:6px 0 0;font-size:28px;font-weight:bold;color:#1a1a2e;">
+        {amount_display}
+      </p>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;color:#333;margin-top:8px;">
+      <tr>
+        <td style="padding:8px 0;color:#888;">Type</td>
+        <td style="padding:8px 0;text-align:right;"><strong>{type_label}</strong></td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#888;border-top:1px solid #eee;">Amount</td>
+        <td style="padding:8px 0;text-align:right;border-top:1px solid #eee;"><strong>{amount_display}</strong></td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#888;border-top:1px solid #eee;">Counterparty</td>
+        <td style="padding:8px 0;text-align:right;border-top:1px solid #eee;"><strong>{counterparty}</strong></td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#888;border-top:1px solid #eee;">Reference</td>
+        <td style="padding:8px 0;text-align:right;border-top:1px solid #eee;font-family:monospace;font-size:12px;">{reference}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0;color:#888;border-top:1px solid #eee;">Timestamp</td>
+        <td style="padding:8px 0;text-align:right;border-top:1px solid #eee;">{timestamp}</td>
+      </tr>
+    </table>
+    <div style="background:#fff8e7;border-radius:6px;padding:12px 16px;margin:20px 0;">
+      <p style="margin:0;font-size:13px;color:#555;">Your current Pulse Score</p>
+      <p style="margin:4px 0 0;font-size:22px;font-weight:bold;color:#1a1a2e;">
+        {pulse_score} <span style="font-size:12px;color:#888;font-weight:normal;">/ 850</span>
+      </p>
+    </div>
+    <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+    <p style="color:#888;font-size:13px;text-align:center;">
+      Questions? <a href="mailto:support@zovu.app" style="color:#1a1a2e;">Contact support</a>
+    </p>
     <p style="color:#aaa;font-size:12px;text-align:center;">
       &copy; 2025 Zovu. All rights reserved.
     </p>

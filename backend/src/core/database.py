@@ -124,6 +124,11 @@ def _apply_schema_patches(connection):
             patches.append("ALTER TABLE users ADD COLUMN partner_approved_at TIMESTAMP NULL")
         if "deleted_at" not in user_cols:
             patches.append("ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP NULL")
+        # Task 9 — geolocation phone reveal: GPS coords for the haversine check.
+        if "location_lat" not in user_cols:
+            patches.append("ALTER TABLE users ADD COLUMN location_lat FLOAT NULL")
+        if "location_lng" not in user_cols:
+            patches.append("ALTER TABLE users ADD COLUMN location_lng FLOAT NULL")
 
     if "gigs" in inspector.get_table_names():
         gig_cols = {col["name"] for col in inspector.get_columns("gigs")}
@@ -156,6 +161,15 @@ def _apply_schema_patches(connection):
         ajos_cols = {col["name"] for col in inspector.get_columns("ajos")}
         if "next_due_date" not in ajos_cols:
             patches.append("ALTER TABLE ajos ADD COLUMN next_due_date TIMESTAMP NULL")
+
+    if "pulse_scores" in inspector.get_table_names():
+        pulse_cols = {col["name"] for col in inspector.get_columns("pulse_scores")}
+        if "punctuality_signal" not in pulse_cols:
+            patches.append("ALTER TABLE pulse_scores ADD COLUMN punctuality_signal INTEGER DEFAULT 0")
+        if "insurance_discipline_signal" not in pulse_cols:
+            patches.append("ALTER TABLE pulse_scores ADD COLUMN insurance_discipline_signal INTEGER DEFAULT 0")
+        if "reputation_signal" not in pulse_cols:
+            patches.append("ALTER TABLE pulse_scores ADD COLUMN reputation_signal INTEGER DEFAULT 0")
 
     for sql in patches:
         try:

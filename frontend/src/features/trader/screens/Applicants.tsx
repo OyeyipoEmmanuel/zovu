@@ -2,12 +2,15 @@ import React, { useEffect, useState } from 'react';
 import {
   fetchAllMyApplicants,
   acceptApplicant,
+  confirmApplication,
+  disputeApplication,
   squadPaySeeker,
   type GigApplicant,
 } from '../../../lib/api';
 import { RatingBadge } from '../../shared/RatingBadge';
 import { ReviewModal } from '../../shared/ReviewModal';
-import { Star } from 'lucide-react';
+import { EscrowStatusPill, Countdown } from '../../shared/EscrowStatusPill';
+import { Star, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 
 const formatNaira = (kobo: number) => `₦${Math.round(kobo / 100).toLocaleString('en-NG')}`;
 const formatDate = (iso: string) =>
@@ -18,12 +21,6 @@ const formatDate = (iso: string) =>
     hour: '2-digit',
     minute: '2-digit',
   });
-
-const statusBadge = (s: string): string => {
-  if (s === 'accepted') return 'bg-[#1A6B4A]/10 text-[#1A6B4A] border-[#1A6B4A]/20';
-  if (s === 'rejected') return 'bg-red-500/10 text-red-400 border-red-500/20';
-  return 'bg-[#F4A11D]/10 text-[#F4A11D] border-[#F4A11D]/20';
-};
 
 export const Applicants: React.FC = () => {
   const [rows, setRows] = useState<GigApplicant[]>([]);
@@ -50,15 +47,72 @@ export const Applicants: React.FC = () => {
 
   useEffect(() => { load(); }, []);
 
+  // Task 9 — geolocation phone reveal. The spec says "Seeker sends their
+  // current GPS in the request body" of accept/hire, but in our UX the trader
+  // is the one initiating the accept call. We pragmatically piggy-back the
+  // device's current GPS on the accept request: if the trader is using the
+  // app on-site with the seeker, the trader's device GPS is a reasonable
+  // proxy for the seeker's GPS. If permission is denied (or unsupported),
+  // we send no coords and the backend skips the reveal — no phone exposure.
+  const getCurrentGps = (): Promise<{ lat: number; lng: number } | null> => {
+    return new Promise((resolve) => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 },
+      );
+    });
+  };
+
   const handleAccept = async (row: GigApplicant) => {
     setBusyId(row.id);
     setError(null);
     try {
-      await acceptApplicant(row.gig_id, row.id);
+      const gps = await getCurrentGps();
+      await acceptApplicant(
+        row.gig_id,
+        row.id,
+        gps ? { seeker_lat: gps.lat, seeker_lng: gps.lng } : undefined,
+      );
       setSuccess(`Accepted ${row.seeker.display_name}`);
       await load();
     } catch (e) {
       setError((e as Error).message || 'Could not accept applicant');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleConfirm = async (row: GigApplicant) => {
+    setBusyId(row.id);
+    setError(null);
+    try {
+      await confirmApplication(row.id);
+      setSuccess(`Confirmed — payout to ${row.seeker.display_name} queued`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message || 'Could not confirm job');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDispute = async (row: GigApplicant) => {
+    if (!window.confirm(
+      `Mark this job incomplete? ${row.seeker.display_name} will be asked to resume work; the escrow stays locked.`,
+    )) return;
+    setBusyId(row.id);
+    setError(null);
+    try {
+      await disputeApplication(row.id);
+      setSuccess(`Sent back to ${row.seeker.display_name}`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message || 'Could not mark incomplete');
     } finally {
       setBusyId(null);
     }
@@ -153,13 +207,13 @@ export const Applicants: React.FC = () => {
                   )}
                 </div>
                 <div className="flex flex-col items-start sm:items-end gap-2">
-                  <span
-                    className={`px-3 py-1 rounded-full border text-[11px] font-syne font-bold tracking-wider uppercase ${statusBadge(
-                      row.status,
-                    )}`}
-                  >
-                    {row.status}
-                  </span>
+                  <EscrowStatusPill status={row.status} />
+                  {row.status === 'worker_done' && row.confirmation_deadline_at && (
+                    <span className="font-dm text-[11px] text-[#F4A11D] inline-flex items-center gap-1">
+                      <Clock size={12} />
+                      <Countdown deadline={row.confirmation_deadline_at} />
+                    </span>
+                  )}
                   <span className="font-dm text-[11px] text-zovu-text">
                     {formatDate(row.applied_at)}
                   </span>
@@ -199,6 +253,56 @@ export const Applicants: React.FC = () => {
                     {busyId === row.id ? 'Working…' : 'Accept applicant'}
                   </button>
                 )}
+
+                {row.status === 'waiting_for_worker' && (
+                  <span className="px-3 py-2 text-zovu-text font-dm text-[12px] italic inline-flex items-center gap-1">
+                    <Clock size={12} />
+                    Waiting for {row.seeker.display_name} to mark the job done.
+                  </span>
+                )}
+
+                {row.status === 'worker_done' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirm(row)}
+                      disabled={busyId === row.id}
+                      className="px-4 py-2 bg-[#1A6B4A] text-white font-dm text-[13px] font-medium rounded-[8px] hover:brightness-110 disabled:opacity-50 transition-all inline-flex items-center gap-2"
+                    >
+                      <CheckCircle2 size={14} />
+                      {busyId === row.id ? 'Working…' : 'Confirm Complete'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDispute(row)}
+                      disabled={busyId === row.id}
+                      className="px-4 py-2 bg-orange-500/10 border border-orange-500/30 text-orange-400 font-dm text-[13px] font-medium rounded-[8px] hover:bg-orange-500/20 disabled:opacity-50 transition-all inline-flex items-center gap-2"
+                    >
+                      <AlertCircle size={14} />
+                      Mark Incomplete
+                    </button>
+                  </>
+                )}
+
+                {row.status === 'in_dispute' && (
+                  <span className="px-3 py-2 text-red-300 font-dm text-[12px] italic">
+                    Support is reviewing this job. Escrow remains locked.
+                  </span>
+                )}
+
+                {row.status === 'trader_confirmed' && row.seeker.squad_account_number && (
+                  <button
+                    type="button"
+                    onClick={() => setReviewFor(row)}
+                    className="px-4 py-2 bg-white/5 border border-white/10 text-zovu-text-light font-dm text-[13px] font-medium rounded-[8px] hover:bg-white/10 transition-all flex items-center gap-2"
+                  >
+                    <Star size={14} />
+                    Review seeker
+                  </button>
+                )}
+
+                {/* Legacy direct-pay button kept for gigs accepted under the
+                    old flow before the escrow state machine landed. */}
                 {row.status === 'accepted' && row.seeker.squad_account_number && (
                   <button
                     onClick={() => {

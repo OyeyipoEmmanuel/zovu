@@ -141,6 +141,11 @@ class User(Base):
     business_type: Mapped[BusinessType | None] = mapped_column(SQLEnum(BusinessType))
     work_needed_type: Mapped[WorkNeededType | None] = mapped_column(SQLEnum(WorkNeededType))
     location: Mapped[str | None] = mapped_column(String(255))
+    # GPS coordinates (decimal degrees). Used by Task 9 geolocation —
+    # haversine distance between trader & seeker decides whether the
+    # trader's phone is appended to the job application note on hire.
+    location_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     primary_language: Mapped[str | None] = mapped_column(String(50))
 
     # Seeker profile
@@ -669,14 +674,20 @@ class PulseScore(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"))
     
-    # 6 weighted signals (all 0-100 scale before weighting)
-    employment_stability_signal: Mapped[int] = mapped_column(Integer)  # weight=0.20
-    income_score_signal: Mapped[int] = mapped_column(Integer)  # weight=0.20
-    repayment_history_signal: Mapped[int] = mapped_column(Integer)  # weight=0.25
-    ajo_participation_signal: Mapped[int] = mapped_column(Integer)  # weight=0.15
-    referral_quality_signal: Mapped[int] = mapped_column(Integer)  # weight=0.10
-    fraud_risk_signal: Mapped[int] = mapped_column(Integer)  # weight=0.10 (inverted)
-    
+    # 9 weighted signals (all 0-100 scale before weighting). Weights are
+    # documented in src/services/pulse_score.py::WEIGHTS — the original six
+    # were scaled by 0.85 to make room for the three new signals (each 0.05).
+    employment_stability_signal: Mapped[int] = mapped_column(Integer)  # weight=0.170
+    income_score_signal: Mapped[int] = mapped_column(Integer)  # weight=0.170
+    repayment_history_signal: Mapped[int] = mapped_column(Integer)  # weight=0.2125
+    ajo_participation_signal: Mapped[int] = mapped_column(Integer)  # weight=0.1275
+    referral_quality_signal: Mapped[int] = mapped_column(Integer)  # weight=0.085
+    fraud_risk_signal: Mapped[int] = mapped_column(Integer)  # weight=0.085 (inverted)
+    # New Task 6 signals — stored 0-100 (scaled inside the service).
+    punctuality_signal: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # weight=0.05
+    insurance_discipline_signal: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # weight=0.05
+    reputation_signal: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # weight=0.05
+
     total_score: Mapped[int] = mapped_column(Integer)  # 0-850
     calculation_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     

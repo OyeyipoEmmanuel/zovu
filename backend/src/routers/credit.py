@@ -178,11 +178,16 @@ async def get_pulse_signals(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Return six signal values (0-100) that explain the Pulse Score.
-    Derived live from the user's transactions, savings, completion rate, etc.
+    Return signal values (0-100) that explain the Pulse Score.
+
+    The base six are derived live from the user's transactions, savings,
+    completion rate, etc. Task 6 adds three more — punctuality (gig arrival
+    vs trader's `scheduled_at`), insurance discipline (Shield recurring
+    payment success rate), and reputation (average review rating).
     """
     from sqlalchemy import func as sa_func
     from src.models import Transaction, Loan, GigApplication, LoanStatus, AjoMembership
+    from src.services.pulse_score import PulseScoreService
     from datetime import datetime, timezone, timedelta
 
     now = datetime.now(timezone.utc)
@@ -264,6 +269,13 @@ async def get_pulse_signals(
     auto_save_signal = min(20, float(user.auto_save_pct or 0.0) * 20)
     financial_discipline = int(min(100, savings_signal + ajo_signal + auto_save_signal))
 
+    # Task 6 — three new signals (each 0.0-1.0 from the service, scaled to
+    # 0-100 for parity with the other signals in this list).
+    pulse_svc = PulseScoreService(db)
+    punctuality_pct = int(round(await pulse_svc._calc_punctuality(user.id) * 100))
+    insurance_pct = int(round(await pulse_svc._calc_insurance_discipline(user.id) * 100))
+    reputation_pct = int(round(await pulse_svc._calc_reputation(user.id) * 100))
+
     signals = [
         {"label": "Transaction Frequency", "value": transaction_frequency},
         {"label": "Transaction Growth", "value": transaction_growth},
@@ -271,6 +283,11 @@ async def get_pulse_signals(
         {"label": "Repayment History", "value": repayment_history},
         {"label": "Network Density", "value": network_density},
         {"label": "Financial Discipline", "value": financial_discipline},
+        # Task 6 — new signals. `key` matches the WEIGHTS dict in pulse_score.py
+        # so frontend consumers can look them up by stable identifier.
+        {"key": "punctuality", "label": "Punctuality", "value": punctuality_pct},
+        {"key": "insurance_discipline", "label": "Insurance Discipline", "value": insurance_pct},
+        {"key": "reputation", "label": "Reputation", "value": reputation_pct},
     ]
     return {"ok": True, "data": {"signals": signals}}
 

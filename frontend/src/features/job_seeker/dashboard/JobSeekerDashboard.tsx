@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useJobSeekerStore, useJobSeekerFeatureAccess } from '../../../stores/jobSeekerStore';
 import { jobSeekerAPI, fetchUserProfile, type UserProfile } from '../../../lib/api';
 import type { JobMatch, JSTransaction } from '../../../lib/mockData';
+import { RecommendationsSection } from '../../shared/RecommendationsSection';
 
 const getTierColor = (tier: string) => {
   switch (tier.toLowerCase()) {
@@ -341,7 +342,7 @@ export const JobSeekerDashboard: React.FC = () => {
             </button>
           ) : (
             <div className="relative group">
-              <button 
+              <button
                 onClick={() => navigate('/dashboard/job-seeker/complete-profile/kyc')}
                 className="w-full bg-zovu-surface-1 border border-zovu-border rounded-[12px] p-4 flex flex-col items-center gap-2 hover:border-[#F4A11D]/40 transition-colors"
               >
@@ -355,6 +356,9 @@ export const JobSeekerDashboard: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* AI-powered partner product recommendations ("For You") */}
+      <RecommendationsSection userId={profile?.id ?? null} />
 
       {/* Recent Transactions */}
       <div>

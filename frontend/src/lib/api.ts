@@ -562,6 +562,42 @@ export const fetchPulseHistory = async (): Promise<PulseHistoryPoint[]> => {
   return Array.isArray(data) ? data : [];
 };
 
+// ─── Partner Product Recommendations ──────────────────────────
+export interface PartnerRecommendation {
+  id: string;
+  product_name: string;
+  partner_name: string;
+  type: string;            // loan | insurance | savings
+  description: string;
+  cta_label: string;       // "Apply Now" | "Get Insured" | "Start Saving"
+  cta_url: string;
+  min_score_required: number;
+}
+
+export interface PartnerRecommendationsResponse {
+  recommendations: PartnerRecommendation[];
+  user_id: string;
+  pulse_score: number;
+  tier: string;
+}
+
+/**
+ * Fetch the user's eligible partner financial products (loans, insurance,
+ * savings). Returns at most 3 items, sorted most-exclusive first.
+ *
+ * Backed by `GET /api/v1/partner-recommendations/:userId` and cached server-
+ * side for one hour. Note: this is intentionally NOT the same endpoint as
+ * `/api/v1/job-seekers/recommendations` (that returns *jobs*, not products).
+ */
+export const fetchPartnerRecommendations = async (
+  userId: string,
+): Promise<PartnerRecommendationsResponse> => {
+  return await rawV1<PartnerRecommendationsResponse>(
+    `/partner-recommendations/${encodeURIComponent(userId)}`,
+    { method: 'GET' },
+  );
+};
+
 // ─── Gigs ──────────────────────────────────────────────────
 export const postGig = async (
   gig: Omit<Gig, 'id' | 'postedAt' | 'status'>
@@ -643,12 +679,35 @@ export const fetchMyGigs = async (): Promise<Gig[]> => {
 };
 
 // ─── Gig Applicants (Trader) ────────────────────────────────
+
+/**
+ * Escrow state-machine application status. `pending` / `rejected` are the
+ * legacy applicant-pool states; everything else maps to the escrow flow.
+ * See `backend/alembic/versions/010_job_escrow_state_machine.py`.
+ */
+export type ApplicationStatus =
+  | 'pending'
+  | 'rejected'
+  | 'waiting_for_worker'
+  | 'worker_done'
+  | 'trader_confirmed'
+  | 'trader_disputed'
+  | 'in_dispute'
+  | 'resolved_paid'
+  | 'resolved_refunded';
+
 export interface GigApplicant {
   id: string;            // application id
   gig_id: string;
   seeker_id: string;
-  status: 'pending' | 'accepted' | 'rejected';
+  status: ApplicationStatus;
   applied_at: string;
+  /** Kobo amount reserved off the trader when this application was accepted. */
+  reserved_amount?: number | null;
+  worker_done_at?: string | null;
+  confirmation_deadline_at?: string | null;
+  /** Free-text note — may contain a revealed trader phone (Task 9). */
+  note?: string | null;
   seeker: {
     id: string;
     display_name: string;
@@ -681,11 +740,46 @@ export const fetchAllMyApplicants = async (): Promise<GigApplicant[]> => {
   return Array.isArray(rows) ? rows : [];
 };
 
-export const acceptApplicant = async (gigId: string, applicationId: string) =>
-  v1OkData<Record<string, unknown>>(`/gigs/${gigId}/accept/${applicationId}`, {
+export const acceptApplicant = async (
+  gigId: string,
+  applicationId: string,
+  opts?: { seeker_lat?: number | null; seeker_lng?: number | null },
+) => {
+  // Task 9 — geolocation phone reveal. Body is optional from the backend's
+  // perspective; if seeker_lat/lng are present AND the trader has stored
+  // GPS, the backend appends the trader's phone to the application note.
+  const body: Record<string, number> = {};
+  if (opts?.seeker_lat != null && opts?.seeker_lng != null) {
+    body.seeker_lat = Number(opts.seeker_lat);
+    body.seeker_lng = Number(opts.seeker_lng);
+  }
+  return v1OkData<Record<string, unknown>>(`/gigs/${gigId}/accept/${applicationId}`, {
     method: 'POST',
-    body: '{}',
+    body: JSON.stringify(body),
   });
+};
+
+// ─── Escrow state machine ──────────────────────────────────
+export interface ApplicationRecord {
+  id: string;
+  gig_id: string;
+  seeker_id: string;
+  status: ApplicationStatus;
+  reserved_amount: number | null;
+  worker_done_at: string | null;
+  confirmation_deadline_at: string | null;
+  note: string | null;
+  applied_at: string;
+}
+
+export const markWorkerDone = (applicationId: string) =>
+  v1OkData<ApplicationRecord>(`/applications/${applicationId}/worker-done`, { method: 'PATCH', body: '{}' });
+
+export const confirmApplication = (applicationId: string) =>
+  v1OkData<ApplicationRecord>(`/applications/${applicationId}/confirm`, { method: 'PATCH', body: '{}' });
+
+export const disputeApplication = (applicationId: string) =>
+  v1OkData<ApplicationRecord>(`/applications/${applicationId}/dispute`, { method: 'PATCH', body: '{}' });
 
 // ─── Public Gigs (no auth required) ────────────────────────
 export const fetchPublicGigs = async (params: {
@@ -1335,6 +1429,27 @@ export const jobSeekerAPI = {
       rating: a.rating == null ? null : Number(a.rating),
       review: a.review == null ? null : String(a.review),
     }));
+  },
+
+  /**
+   * Active applications for the seeker — the rows that aren't in a terminal
+   * state. Used by the dashboard to render Mark Done buttons + 24h countdown.
+   */
+  getActiveApplications: async (): Promise<ApplicationRecord[]> => {
+    const apps = await v1OkData<Record<string, unknown>[]>(`/job-seekers/applications`, { method: 'GET' });
+    const rows = (Array.isArray(apps) ? apps : []).map((a): ApplicationRecord => ({
+      id: String(a.id),
+      gig_id: String(a.gig_id),
+      seeker_id: String(a.seeker_id ?? ''),
+      status: String(a.status) as ApplicationStatus,
+      reserved_amount: a.reserved_amount == null ? null : Number(a.reserved_amount),
+      worker_done_at: (a.worker_done_at as string | null) ?? null,
+      confirmation_deadline_at: (a.confirmation_deadline_at as string | null) ?? null,
+      note: (a.note as string | null) ?? null,
+      applied_at: String(a.applied_at ?? ''),
+    }));
+    const terminal = new Set(['rejected', 'trader_confirmed', 'resolved_paid', 'resolved_refunded']);
+    return rows.filter((r) => !terminal.has(r.status));
   },
 
   getNotifications: async (type?: 'job' | 'payment' | 'score'): Promise<JSNotification[]> => {

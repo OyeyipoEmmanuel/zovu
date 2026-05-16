@@ -206,6 +206,7 @@ def create_app() -> FastAPI:
         webhooks_router,
         admin_router,
         reviews_router,
+        partner_recommendations_router,
     )
 
     app.include_router(auth_router, prefix="/api/v1/auth", tags=["Auth"])
@@ -222,6 +223,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks_router, prefix="/api/v1/webhooks", tags=["Webhooks"])
     app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
     app.include_router(reviews_router, prefix="/api/v1")
+    app.include_router(partner_recommendations_router, prefix="/api/v1")
     
     logger.info("application_created", routes=len(app.routes))
     return app

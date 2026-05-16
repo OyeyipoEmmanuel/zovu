@@ -2,7 +2,7 @@
 Gigs router — CRUD, apply, accept, complete endpoints.
 """
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
@@ -75,6 +75,20 @@ class CreateGigRequest(BaseModel):
 
 class CompleteGigRequest(BaseModel):
     trader_rating: int | None = None
+
+
+class AcceptApplicantRequest(BaseModel):
+    """Body for the accept-applicant endpoint.
+
+    `seeker_lat` / `seeker_lng` are optional GPS coordinates captured from the
+    seeker's device. When provided AND the trader has stored coordinates, the
+    backend computes the haversine distance; if it falls within
+    `settings.GEOLOCATION_PHONE_REVEAL_KM`, the trader's decrypted phone is
+    appended to the application's `note` field so the seeker can call them on
+    arrival.
+    """
+    seeker_lat: float | None = None
+    seeker_lng: float | None = None
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -196,13 +210,27 @@ async def list_applicants(
 async def accept_applicant(
     gig_id: str,
     application_id: str,
+    payload: AcceptApplicantRequest = Body(default_factory=AcceptApplicantRequest),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Trader accepts a seeker applicant — gig moves to IN_PROGRESS."""
+    """Trader accepts a seeker applicant — gig moves to IN_PROGRESS.
+
+    Optional body: { "seeker_lat": <float>, "seeker_lng": <float> }. When
+    provided, the seeker's GPS is haversine-compared with the trader's stored
+    GPS — if within `GEOLOCATION_PHONE_REVEAL_KM` km, the trader's phone is
+    decrypted server-side and appended to the application note. Phone is
+    never exposed in the response body.
+    """
     svc = GigService(db)
     async with db.begin_nested():
-        gig = await svc.accept_applicant(user, gig_id, application_id)
+        gig = await svc.accept_applicant(
+            user,
+            gig_id,
+            application_id,
+            seeker_lat=payload.seeker_lat,
+            seeker_lng=payload.seeker_lng,
+        )
     await db.commit()
     return {"ok": True, "data": _serialize_gig(gig)}
 
@@ -221,41 +249,5 @@ async def complete_gig(
     await db.commit()
     return {"ok": True, "data": _serialize_gig(gig)}
 
-
-@router.patch("/applications/{application_id}/worker-done", response_model=dict, summary="Worker marks job done")
-async def mark_worker_done(
-    application_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    svc = GigService(db)
-    async with db.begin_nested():
-        app = await svc.worker_done(user, application_id)
-    await db.commit()
-    return {"ok": True, "data": _serialize_application(app)}
-
-
-@router.patch("/applications/{application_id}/confirm", response_model=dict, summary="Trader confirms completed job")
-async def confirm_application(
-    application_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    svc = GigService(db)
-    async with db.begin_nested():
-        app = await svc.confirm_application(user, application_id)
-    await db.commit()
-    return {"ok": True, "data": _serialize_application(app)}
-
-
-@router.patch("/applications/{application_id}/dispute", response_model=dict, summary="Trader marks job incomplete")
-async def dispute_application(
-    application_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    svc = GigService(db)
-    async with db.begin_nested():
-        app = await svc.dispute_application(user, application_id)
-    await db.commit()
-    return {"ok": True, "data": _serialize_application(app)}
+# Note: the escrow state-machine PATCH endpoints live in routers/applications.py
+# under /api/v1/applications/{application_id}/{worker-done,confirm,dispute}.

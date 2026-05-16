@@ -19,6 +19,7 @@ import type { Transaction } from '../../../lib/mockData';
 import { useKYCGuard, KYCModal } from '../hooks';
 import { LoanFlowModal } from './LoanFlowModal';
 import { DepositModal } from '../../shared/DepositModal';
+import { RecommendationsSection } from '../../shared/RecommendationsSection';
 
 export const DashboardHome: React.FC = () => {
   const { kycComplete } = useKYCGuard();
@@ -353,6 +354,9 @@ export const DashboardHome: React.FC = () => {
           <span className="font-dm text-[12px] text-zovu-text-light">Apply for Loan</span>
         </div>
       </div>
+
+      {/* AI-powered partner product recommendations ("For You") */}
+      <RecommendationsSection userId={userId || null} />
     </div>
   );
 };

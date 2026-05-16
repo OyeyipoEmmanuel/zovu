@@ -1,12 +1,14 @@
 """
 GigService — business logic for gig lifecycle.
 """
+import math
 import uuid
 import structlog
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, and_, or_
 
+from src.config import settings
 from src.models.base import Gig, GigApplication, GigStatus, User, UserType
 
 logger = structlog.get_logger()
@@ -98,7 +100,18 @@ class GigService:
     # ── Apply ────────────────────────────────────────────────────────────────
 
     async def apply_to_gig(self, seeker: User, gig_id: str) -> GigApplication:
-        """Seeker applies to a gig. One application per seeker per gig."""
+        """Seeker applies to a gig.
+
+        The row is created in `pending` — money is *not* reserved here; that
+        happens in `accept_applicant` once the trader picks this seeker. This
+        keeps the existing applicant-pool UX (many can apply, trader picks
+        one) and only kicks off the escrow state machine on accept.
+
+        The spec's literal "/listings/:id/apply → waiting_for_worker + money
+        reserved" assumes a one-applicant-per-gig auto-accept model. If we
+        moved straight to waiting_for_worker here, the second applicant would
+        get `GIG_NOT_OPEN`, and the existing trader Accept UI would error.
+        """
         _require_seeker(seeker)
         gig = await self.get_gig(gig_id)
 
@@ -118,13 +131,9 @@ class GigService:
             id=str(uuid.uuid4()),
             gig_id=gig_id,
             seeker_id=seeker.id,
-            status=WAITING_FOR_WORKER,
-            reserved_amount=gig.amount,
+            status="pending",
         )
         self.db.add(application)
-        gig.seeker_id = seeker.id
-        gig.status = GigStatus.IN_PROGRESS
-        gig.accepted_at = datetime.now(timezone.utc)
         await self.db.flush()
         return application
 
@@ -190,8 +199,23 @@ class GigService:
 
     # ── Accept ───────────────────────────────────────────────────────────────
 
-    async def accept_applicant(self, trader: User, gig_id: str, application_id: str) -> Gig:
-        """Trader accepts an applicant — gig moves to IN_PROGRESS."""
+    async def accept_applicant(
+        self,
+        trader: User,
+        gig_id: str,
+        application_id: str,
+        seeker_lat: float | None = None,
+        seeker_lng: float | None = None,
+    ) -> Gig:
+        """Trader accepts an applicant — gig moves to IN_PROGRESS.
+
+        Task 9 — geolocation phone reveal: when the seeker's current GPS is
+        provided and the trader has stored GPS coordinates, compute the
+        haversine distance. If it's within `settings.GEOLOCATION_PHONE_REVEAL_KM`,
+        decrypt the trader's phone (Fernet) and append it to the application's
+        `note` field. The decrypted phone is *never* returned in the API
+        response — it only travels via the note column.
+        """
         _require_trader(trader)
         gig = await self.get_gig(gig_id)
         if gig.trader_id != trader.id:
@@ -222,8 +246,85 @@ class GigService:
         for other in others:
             other.status = "rejected"
 
+        # Task 9 — geolocation phone reveal.
+        await self._maybe_append_trader_phone_to_note(
+            trader=trader,
+            application=app,
+            seeker_lat=seeker_lat,
+            seeker_lng=seeker_lng,
+        )
+
         await self.db.flush()
         return gig
+
+    async def _maybe_append_trader_phone_to_note(
+        self,
+        trader: User,
+        application: GigApplication,
+        seeker_lat: float | None,
+        seeker_lng: float | None,
+    ) -> None:
+        """If seeker is within the configured radius, append the trader's phone
+        to the application note. Otherwise: no-op (phone is never exposed).
+        """
+        if seeker_lat is None or seeker_lng is None:
+            return
+        t_lat = getattr(trader, "location_lat", None)
+        t_lng = getattr(trader, "location_lng", None)
+        if t_lat is None or t_lng is None:
+            return
+        if not trader.phone:
+            return
+
+        try:
+            distance_km = _haversine_km(
+                float(seeker_lat), float(seeker_lng), float(t_lat), float(t_lng)
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "geo_phone_reveal_bad_coords",
+                application_id=application.id,
+                error=str(exc),
+            )
+            return
+
+        threshold_km = float(settings.GEOLOCATION_PHONE_REVEAL_KM)
+        if distance_km > threshold_km:
+            logger.info(
+                "geo_phone_reveal_skipped_out_of_range",
+                application_id=application.id,
+                distance_km=round(distance_km, 3),
+                threshold_km=threshold_km,
+            )
+            return
+
+        try:
+            from src.core.security import decrypt_pii
+            phone_plain = decrypt_pii(trader.phone)
+        except Exception as exc:
+            logger.warning(
+                "geo_phone_reveal_decrypt_failed",
+                application_id=application.id,
+                error=str(exc),
+            )
+            return
+
+        existing_note = application.note or ""
+        contact_line = f"Contact trader: {phone_plain}"
+        # Guard against double-append if accept is retried.
+        if contact_line in existing_note:
+            return
+        if existing_note:
+            application.note = f"{existing_note}\nContact trader: {phone_plain}"
+        else:
+            application.note = f"\nContact trader: {phone_plain}"
+
+        logger.info(
+            "geo_phone_reveal",
+            application_id=application.id,
+            distance_km=round(distance_km, 3),
+            threshold_km=threshold_km,
+        )
 
     # ── Escrow state machine ───────────────────────────────────────────────
 
@@ -376,3 +477,17 @@ def _require_seeker(user: User) -> None:
         if (user.role or "").lower() not in ("job_seeker", "seeker", "both"):
             from src.core.exceptions import ZovuAPIError
             raise ZovuAPIError(status_code=403, code="FORBIDDEN", message="Job seeker role required")
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance between two GPS points in kilometres."""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlng / 2) ** 2
+    )
+    return 2 * R * math.asin(math.sqrt(a))

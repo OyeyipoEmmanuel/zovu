@@ -249,9 +249,17 @@ async def get_my_applications(
         q = q.where(GigApplication.status == status)
     q = q.order_by(desc(GigApplication.applied_at))
     apps = (await db.execute(q)).scalars().all()
+    # Include the escrow-state-machine fields so the seeker dashboard can
+    # render the Mark Done button + countdown without an extra round-trip.
     return {"ok": True, "data": [
         {
-            "id": a.id, "gig_id": a.gig_id, "status": a.status,
+            "id": a.id,
+            "gig_id": a.gig_id,
+            "status": a.status,
+            "reserved_amount": a.reserved_amount,
+            "worker_done_at": a.worker_done_at.isoformat() if a.worker_done_at else None,
+            "confirmation_deadline_at": a.confirmation_deadline_at.isoformat() if a.confirmation_deadline_at else None,
+            "note": a.note,
             "applied_at": a.applied_at.isoformat() if a.applied_at else None,
         }
         for a in apps

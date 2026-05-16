@@ -1,902 +1,452 @@
-# Zovu — Connect. Work. Grow.
+# ZOVU — Connect. Work. Grow.
 
-An intelligent economic platform that onboards informal traders and job seekers, matches workers to opportunities via AI, and builds financial identity through behavioural data — powered by Squad API.
+ZOVU is an intelligent economic platform that onboards informal traders and job
+seekers in Nigeria, matches workers to gigs via AI embeddings, and builds a
+financial identity (the **Pulse Score**) from real behavioural and payment
+data. Every money movement runs through **Squad API** — virtual accounts,
+transfers, Ajo group savings, microloans and referral bonuses — so the platform
+earns a verifiable transaction trail it can underwrite from.
+
+This README is the single source of truth for getting the full stack running
+locally. A teammate who has never touched the code should reach a working
+browser session in under 15 minutes by following it top to bottom.
 
 ---
 
-## Repo Structure
+## Architecture
 
 ```
-zovu/
-├── frontend/        # React + Vite + Tailwind (Frontend)
-├── backend/         # FastAPI + Python (Backend)
-├── types/           # Shared TypeScript types (FE reference)
-├── .gitignore
-└── README.md
+                          ┌────────────────────────────┐
+                          │  Browser (React 19 + Vite) │
+                          │  http://localhost:5173      │
+                          └──────────────┬─────────────┘
+                                         │  /api/* proxied
+                                         ▼
+                          ┌────────────────────────────┐
+                          │  FastAPI (uvicorn)         │
+                          │  http://localhost:4000      │
+                          │  src/main.py · /api/v1/*    │
+                          └──────┬───────────────┬─────┘
+                                 │               │
+                  async SQLAlchemy           async redis-py
+                                 │               │
+                                 ▼               ▼
+              ┌──────────────────────────┐   ┌─────────────┐
+              │  PostgreSQL + pgvector   │   │  Redis 7    │
+              │  (or SQLite for dev)     │   │  cache +    │
+              │  users, gigs, txns,      │   │  rate limit │
+              │  ajo, pulse_scores …     │   │  + broker   │
+              └──────────────────────────┘   └──────┬──────┘
+                                                    │
+                                                    ▼
+                                        ┌──────────────────────┐
+                                        │  Celery workers      │
+                                        │  queues: critical /  │
+                                        │  default / low       │
+                                        │  src/workers/*       │
+                                        └──────────┬───────────┘
+                                                   │
+                  ┌────────────────────────────────┼────────────────────────────────┐
+                  ▼                                ▼                                ▼
+        ┌──────────────────┐            ┌────────────────────┐          ┌──────────────────┐
+        │  Squad API       │            │  OpenAI Whisper    │          │  Anthropic       │
+        │  Virtual accts,  │            │  Voice → text      │          │  Claude (NLP +   │
+        │  transfers,      │            │  (YO/IG/HA/Pidgin) │          │  financial chat) │
+        │  webhooks (HMAC) │            └────────────────────┘          └──────────────────┘
+        └──────────────────┘                                                       │
+                                                                                   ▼
+                                                                         ┌──────────────────┐
+                                                                         │  Cohere v3       │
+                                                                         │  1024-d multi-   │
+                                                                         │  lingual         │
+                                                                         │  embeddings      │
+                                                                         └──────────────────┘
 ```
+
+The frontend never calls third-party AI or payment services directly. Every
+side-effecting call leaves the request path and runs on a Celery worker, so
+HTTP responses stay fast and retryable.
 
 ---
 
 ## Prerequisites
 
-Make sure you have these installed before cloning:
+| Tool             | Version | Required for                                |
+|------------------|---------|---------------------------------------------|
+| Python           | 3.11+   | Backend / Celery (3.12 used in Docker)      |
+| Node.js          | 20+     | Frontend (Vite 8, React 19)                 |
+| Docker Desktop   | latest  | Easiest path to run Redis + the API         |
+| Git              | latest  | Cloning the repo                            |
 
-| Tool | Version | Check |
-|------|---------|-------|
-| Node.js | 18+ | `node -v` |
-| npm | 9+ | `npm -v` |
-| Python | 3.11+ | `python --version` |
-| pip | latest | `pip --version` |
-| PostgreSQL | 15+ | `psql --version` |
-| Redis | 7+ | `redis-cli --version` |
+Docker is optional — you can run everything on the host if you prefer (see
+section 5, Option B), but you will then need a local Redis 7 install.
 
 ---
 
-## Getting Started
-
-### 1. Clone the repo
+## 1. Clone
 
 ```bash
-git clone https://github.com/your-org/zovu.git
+git clone https://github.com/OyeyipoEmmanuel/zovu.git
 cd zovu
 ```
 
----
+The repo layout is:
 
-### 2. Frontend Setup
-
-```bash
-cd frontend
-npm install
-cp .env.example .env.local
-npm run dev
+```
+zovu/
+├── backend/          # FastAPI + Celery (Python 3.11+)
+├── frontend/         # React 19 + Vite + Tailwind 4
+├── AI-engineer/      # CSV seed data + ML notebooks (read-only at runtime)
+└── README.md         # This file
 ```
 
-FE runs at → `http://localhost:5173`
+---
 
-**Fill in `frontend/.env.local`:**
+## 2. Environment Setup
+
+Create `backend/.env` by copying the template:
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Then fill in the values below. These are the **exact** keys
+`backend/src/config.py` reads — leaving a required one blank will crash the app
+at startup with a Pydantic validation error.
 
 ```env
-VITE_API_URL=http://localhost:8000
-```
-
----
-
-### 3. Backend Setup
-
-Navigate to the [Backend LLD Documentation](#backend-low-level-design) section below for detailed setup and architecture.
-
-Quick start:
-```bash
-cd backend
-python -m venv venv
-
-# Mac/Linux
-source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
-
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Then follow the detailed backend setup guide below.
-
-BE runs at → `http://localhost:8000`
-API docs at → `http://localhost:8000/docs`
-
----
-
----
-
-# Backend Low-Level Design
-
-Production-grade backend for Zovu: an intelligent economic platform connecting informal traders and job seekers, powered by FastAPI, PostgreSQL, and Squad API.
-
-**Stack:** FastAPI · PostgreSQL · Redis · Celery · pgvector · Async-first architecture
-
----
-
-## Backend Table of Contents
-
-- [System Architecture](#system-architecture)
-- [Technology Stack](#technology-stack)
-- [Project Structure](#project-structure)
-- [Development Setup](#backend-development-setup)
-- [Core Concepts](#core-concepts)
-  - [Authentication & Security](#authentication--security)
-  - [Database Design](#database-design)
-  - [API Design](#api-design)
-- [Services & Workers](#services--workers)
-- [Deployment](#deployment)
-
----
-
-## System Architecture
-
-### Layered Design
-
-```
-┌─────────────┐
-│   Gateway   │  Nginx (reverse proxy, rate limiting, SSL, IP allowlist)
-├─────────────┤
-│ API Layer   │  FastAPI · Uvicorn workers · Pydantic v2 validation · JWT middleware
-├─────────────┤
-│Service Layer│  All business logic (Auth, Credit, Matching, Squad, Fraud, Onboarding)
-├─────────────┤
-│ Data Layer  │  PostgreSQL (Supabase) · SQLAlchemy 2.0 async · Alembic migrations
-├─────────────┤
-│Workers      │  Celery + Redis broker (credit recalc, embeddings, webhooks, fraud)
-├─────────────┤
-│External APIs│  Squad (payments) · OpenAI Whisper · Claude NLP · Cohere embeddings
-└─────────────┘
-```
-
-### Request Lifecycle
-
-```
-Client → Nginx → FastAPI Router → Auth Dependency → Service Layer → DB/Redis → Celery Task
-```
-
-**Design Philosophy:**
-- Every network call is async (no sync DB calls anywhere)
-- Background work always offloaded to Celery → HTTP response returns fast
-- Fraud checks run as non-blocking side effects (never in request path)
-- Versioned from day 1: all routes under `/api/v1/`
-
----
-
-## Technology Stack
-
-### Core Framework
-
-| Component | Choice | Why |
-|-----------|--------|-----|
-| **Web Framework** | FastAPI 0.111+ | Async-native, Pydantic v2 built-in, automatic OpenAPI docs, best Python perf |
-| **Server** | Uvicorn + Gunicorn | 4+ workers in production for horizontal scaling |
-| **Async DB** | SQLAlchemy 2.0 + asyncpg | Full ORM with type safety, 3–5× faster than psycopg2 for async |
-| **Migrations** | Alembic | Code-controlled, team-friendly, CI/CD compatible (not Supabase UI) |
-| **Validation** | Pydantic v2 | Rust-core, 5–50× faster than v1, strict mode prevents coercion bugs |
-
-### Security & Authentication
-
-| Component | Choice | Config |
-|-----------|--------|--------|
-| **Password Hashing** | Argon2id (argon2-cffi) | Winner of Password Hashing Competition; memory-hard, GPU-resistant |
-| **Token Signing** | RS256 JWT (python-jose) | Asymmetric — public key verifies without exposing private key |
-| **Access Token TTL** | 15 minutes | Stateless, stored in client memory only (never localStorage) |
-| **Refresh Token TTL** | 7 days | Opaque UUID, stored server-side, rotated on use, httpOnly cookie |
-| **Token Rotation** | Family-based | Stolen token detected on next legitimate use → entire session invalidated |
-
-### Data & Caching
-
-| Component | Choice | Use Case |
-|-----------|--------|----------|
-| **Primary DB** | PostgreSQL 15 (Supabase) | Relational data + pgvector for embeddings |
-| **Vector Extension** | pgvector | Cosine similarity search for job/seeker matching (IVFFlat index) |
-| **Cache** | Redis 7 (redis-py async) | Rate limits, token blacklist, credit cache, Celery broker |
-| **Async Pool** | asyncpg connection pool | 20 connections, 10 overflow, pre-ping enabled |
-
-### Background Jobs & Messaging
-
-| Component | Choice | Queues |
-|-----------|--------|--------|
-| **Task Queue** | Celery 5 + Redis broker | 3 queues: `critical`, `default`, `low` with separate workers |
-| **Monitoring** | Flower | Dashboard at `/metrics` (restricted access in production) |
-| **HTTP Client** | httpx (async) | Never use `requests` — blocks the event loop |
-
-### External APIs & AI
-
-| Service | Purpose | Integration |
-|---------|---------|-------------|
-| **Squad** | Payments | Virtual accounts, transfers, webhooks (HMAC-SHA512 verified) |
-| **OpenAI Whisper** | Voice transcription | Multilingual support (Yoruba, Igbo, Hausa, Pidgin, English) |
-| **Anthropic Claude** | NLP extraction & financial assistant | Profile extraction from voice, contextual chat |
-| **Cohere v3** | Multilingual embeddings | 1024-dim vectors for job/seeker matching |
-
-### Observability
-
-| Tool | Purpose |
-|------|---------|
-| **structlog** | JSON-structured logging with request_id, user_id, trace_id |
-| **Sentry SDK** | Unhandled exceptions, slow queries, Celery failures |
-| **prometheus-fastapi-instrumentator** | Metrics endpoint for Prometheus → Grafana |
-
----
-
-## Backend Project Structure
-
-```
-backend/
-├── src/
-│   ├── main.py                   # FastAPI app factory & startup
-│   ├── config.py                 # Pydantic Settings (environment validation)
-│   ├── dependencies.py           # Shared FastAPI deps (get_db, get_current_user)
-│   │
-│   ├── routers/                  # Thin HTTP layer — only in/out validation
-│   │   ├── auth.py              # Login, register, token refresh, logout
-│   │   ├── onboard.py           # Voice/manual profile submission
-│   │   ├── matches.py           # Job matching & recommendations
-│   │   ├── credit.py            # Credit score & history endpoints
-│   │   ├── transactions.py      # Transaction history & confirmation
-│   │   ├── ajo.py               # Group savings (Ajo/esusu)
-│   │   ├── lender.py            # Lender profile & loan offerings
-│   │   ├── referral.py          # Referral tracking & payouts
-│   │   └── webhooks.py          # Squad webhook receiver
-│   │
-│   ├── services/                 # All business logic
-│   │   ├── auth_service.py      # Password hashing, JWT generation, token rotation
-│   │   ├── credit_service.py    # Pulse Score calculation (6 weighted signals)
-│   │   ├── squad_service.py     # Virtual account creation, transfers, signature verification
-│   │   ├── match_service.py     # Job-seeker matching via pgvector
-│   │   ├── onboard_service.py   # Profile extraction via Claude
-│   │   ├── ajo_service.py       # Group savings operations
-│   │   ├── lender_service.py    # Loan underwriting
-│   │   ├── referral_service.py  # Referral tracking
-│   │   └── fraud_service.py     # Fraud flag evaluation (non-blocking)
-│   │
-│   ├── models/                   # SQLAlchemy ORM models
-│   │   ├── user.py              # User accounts & profiles
-│   │   ├── credit.py            # Credit scores & history
-│   │   ├── transaction.py       # Squad transactions (partitioned by month)
-│   │   ├── job.py               # Job listings & applications
-│   │   ├── ajo.py               # Group savings groups & members
-│   │   ├── loan.py              # Microloan records
-│   │   └── referral.py          # Referral relationships
-│   │
-│   ├── schemas/                  # Pydantic v2 request/response schemas
-│   │   ├── auth.py              # Login, register, token responses
-│   │   ├── credit.py            # Credit score response shapes
-│   │   ├── job.py               # Job & match schemas
-│   │   └── ...
-│   │
-│   ├── core/
-│   │   ├── security.py          # Argon2, JWT, token rotation logic
-│   │   ├── redis_client.py      # Async Redis pool + multi-DB routing
-│   │   ├── database.py          # SQLAlchemy async engine setup
-│   │   ├── exceptions.py        # Custom exception hierarchy
-│   │   └── middleware.py        # CORS, rate limiting, request ID tracking
-│   │
-│   ├── workers/                  # Celery task definitions
-│   │   ├── celery_app.py        # Celery app factory
-│   │   ├── credit_tasks.py      # Credit recalculation tasks
-│   │   ├── embedding_tasks.py   # Cohere embedding generation
-│   │   ├── squad_tasks.py       # Squad webhook processing
-│   │   └── fraud_tasks.py       # Fraud flag evaluation
-│   │
-│   └── alembic/                  # Database migrations
-│       ├── env.py
-│       ├── versions/
-│       └── script.py.mako
-│
-├── requirements.txt
-├── .env.example
-└── docker-compose.yml
-```
-
----
-
-## Backend Development Setup
-
-### Prerequisites (Backend Only)
-
-```bash
-Python 3.11+
-PostgreSQL 15+
-Redis 7+
-```
-
-### 1. Environment Variables
-
-Create `backend/.env`:
-
-```env
-# Database
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/zovu
+# ───────────── Database ─────────────
+# Dev (SQLite, zero-setup): sqlite+aiosqlite:///./zovu_dev.db
+# Prod / Supabase: postgresql+asyncpg://user:password@host:5432/zovu
+DATABASE_URL=sqlite+aiosqlite:///./zovu_dev.db
 DATABASE_POOL_SIZE=20
 DATABASE_MAX_OVERFLOW=10
 
-# Redis
+# ───────────── Redis ─────────────
+# Required. Used for cache, rate limits, token blacklist AND as the Celery broker (DB /2).
 REDIS_URL=redis://localhost:6379
 
-# JWT (generate with: openssl genrsa -out private.pem 2048; openssl rsa -in private.pem -pubout -out public.pem)
+# Leave these blank — the app derives the broker from REDIS_URL automatically.
+CELERY_BROKER_URL=
+CELERY_RESULT_BACKEND=
+
+# ───────────── JWT (RS256 asymmetric) ─────────────
+# Generate locally:
+#   openssl genrsa -out private.pem 2048
+#   openssl rsa -in private.pem -pubout -out public.pem
+# Paste the PEM contents with literal \n between lines.
 JWT_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----
 JWT_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----
 JWT_ACCESS_TTL_MINUTES=15
 JWT_REFRESH_TTL_DAYS=7
 
-# Squad
-SQUAD_SECRET_KEY=sandbox_sk_xxxxxxxxxxxxxxxxxxxx
+# ───────────── Squad API ─────────────
+# Get from https://sandbox.squadco.com → Merchant Settings → API & Webhook.
+SQUAD_SECRET_KEY=sandbox_sk_xxxxxxxxxxxx
+SQUAD_PUBLIC_KEY=sandbox_pk_xxxxxxxxxxxx
 SQUAD_BASE_URL=https://sandbox-api-d.squadco.com
+SQUAD_WEBHOOK_IP=
+# Single merchant virtual account that receives Ajo deposits (optional in dev).
+AJO_SQUAD_MERCHANT_ACCOUNT=
+SQUAD_MERCHANT_ACCOUNT_NUMBER=
 
-# External APIs
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxx
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxx
-COHERE_API_KEY=xxxxxxxxxxxxxxxxxxxx
+# ───────────── External AI APIs (optional in dev — features degrade gracefully) ─────────────
+OPENAI_API_KEY=                  # https://platform.openai.com — Whisper voice
+ANTHROPIC_API_KEY=               # https://console.anthropic.com — Claude NLP + chat
+COHERE_API_KEY=                  # https://dashboard.cohere.com — multilingual embeddings
 
-# PII Encryption (Fernet key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-FIELD_ENCRYPTION_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# ───────────── PII encryption ─────────────
+# Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# If left blank in development the app auto-generates one and logs a warning.
+FIELD_ENCRYPTION_KEY=
 
-# App
+# ───────────── Application ─────────────
+PORT=4000
 ENVIRONMENT=development
-DEBUG=True
-ALLOWED_ORIGINS=["http://localhost:5173"]
+DEBUG=true
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174
 SENTRY_DSN=
+
+# ───────────── Email (used for receipts, job-match notifications) ─────────────
+EMAIL_PROVIDER=smtp              # smtp | sendgrid
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+FROM_EMAIL=noreply@zovu.app
+FROM_NAME=Zovu
+SENDGRID_API_KEY=
+
+# ───────────── Frontend deep-link URL ─────────────
+FRONTEND_URL=http://localhost:5173
+
+# ───────────── Default admin (created idempotently by the seeder) ─────────────
+ADMIN_EMAIL=admin@zovu.co
+ADMIN_PASSWORD=ZovuAdmin2026!
+ADMIN_FULL_NAME=Admin User
+
+# ───────────── Seed data ─────────────
+# Absolute path to the AI-engineer/data folder. The Docker compose mounts it for you.
+CSV_DATA_DIR=
 ```
 
-### 2. Virtual Environment & Dependencies
+The frontend does **not** need a `.env` file for local development — Vite
+proxies `/api/*` to `http://localhost:4000` via `frontend/vite.config.ts`.
+
+---
+
+## 3. Start Infrastructure
+
+The compose file at `backend/docker-compose.yml` ships three services: `api`,
+`celery_worker`, and `redis`. Postgres is **not** part of the dev stack — the
+API defaults to a SQLite file living in a Docker volume so you have zero local
+DB setup.
+
+```bash
+cd backend
+docker compose up -d redis
+```
+
+That brings up just Redis on `localhost:6379`. If you do not have Docker, start
+a local `redis-server` instead — anything on port 6379 works.
+
+---
+
+## 4. Database Setup
+
+Schema and seed data are both created **automatically on app startup**:
+
+- `src/main.py` lifespan → `init_db()` runs `Base.metadata.create_all`, creating
+  every table and patching any new columns onto an older dev DB.
+- The same lifespan hook then calls `run_seeder()` (in `src/core/seeder.py`),
+  which loads `AI-engineer/data/*.csv` into the DB if it is empty. The seeder
+  is idempotent — re-running it is safe.
+- The default admin (`admin@zovu.co` / `ZovuAdmin2026!`) is also created here.
+
+So for a typical local run there is **nothing to do in this section** — just
+proceed to section 5.
+
+If you are on PostgreSQL and want to use real Alembic migrations instead of
+`create_all`:
+
+```bash
+cd backend/alembic
+alembic upgrade head
+```
+
+(The `alembic.ini` lives inside `backend/alembic/` and points
+`script_location = alembic` at the same folder, so the command must be run
+from there.)
+
+---
+
+## 5. Run the Backend
+
+### Option A — Docker (recommended)
+
+From `backend/`:
+
+```bash
+docker compose up
+```
+
+That builds `Dockerfile`, starts the `api` container on
+[http://localhost:4000](http://localhost:4000), starts a `celery_worker`
+listening on all three queues (`critical,default,low`), and starts `redis`.
+Logs stream to your terminal; press Ctrl-C to stop.
+
+### Option B — Manual (on the host)
+
+You need Python 3.11+, a running Redis on port 6379, and the `backend/.env`
+file from section 2.
 
 ```bash
 cd backend
 python -m venv venv
 
-# Mac/Linux
+# Activate venv
+# macOS/Linux:
 source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
+# Windows (PowerShell):
+venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
+
+# Run the API
+uvicorn src.main:app --host 0.0.0.0 --port 4000 --reload
 ```
 
-### 3. Database Setup
+In separate terminals (each with the venv activated) start the Celery workers.
+The Procfile defines `worker`, `beat` and `flower`; for development you can
+either run a single worker that consumes all three queues, or split them:
 
 ```bash
-# Create database
-createdb zovu
+# Single combined worker (simplest):
+celery -A src.workers.celery_app worker --loglevel=info -Q critical,default,low
 
-# Run migrations
-alembic upgrade head
+# Or, split into priority queues (matches production):
+celery -A src.workers.celery_app worker -Q critical -c 4 --loglevel=info
+celery -A src.workers.celery_app worker -Q default  -c 4 --loglevel=info
+celery -A src.workers.celery_app worker -Q low      -c 2 --loglevel=info
 
-# Enable pgvector extension
-psql -d zovu -c "CREATE EXTENSION IF NOT EXISTS vector;"
+# Optional: Flower task monitor
+celery -A src.workers.celery_app flower    # http://localhost:5555
 ```
 
-### 4. Start Services
+Health-check that the API is up:
 
 ```bash
-# Terminal 1: FastAPI dev server
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
-
-# Terminal 2: Celery worker (default queue)
-celery -A src.workers.celery_app worker -Q default -l info
-
-# Terminal 3: Celery worker (critical queue)
-celery -A src.workers.celery_app worker -Q critical -l info
-
-# Terminal 4: Flower monitoring UI
-celery -A src.workers.celery_app flower
-
-# Terminal 5: Redis (if running locally)
-redis-server
-```
-
-**API docs:** http://localhost:8000/docs  
-**Flower UI:** http://localhost:5555
-
----
-
-## Core Concepts
-
-### Authentication & Security
-
-#### Token Architecture
-
-- **Access Token (JWT RS256)** — 15 min TTL, stored in client memory only, stateless, includes `sub` (user_id), `role`, `jti` (for blacklisting), `exp`
-- **Refresh Token (Opaque UUID)** — 7 days TTL, stored server-side in `refresh_tokens` table, httpOnly cookie, rotated on every use
-- **Token Rotation** — Refresh tokens use family-based invalidation: stealing and using a token before the legitimate user does triggers a family rotation, forcing re-login
-
-#### Rate Limiting (via slowapi)
-
-```
-Login / OTP:         5 requests / minute / IP
-Register:            3 requests / hour / IP
-Token refresh:       10 requests / minute / user
-Voice upload:        10 requests / hour / user
-General API:         120 requests / minute / user
-```
-
-#### Security Controls
-
-- **Password hashing:** Argon2id with time_cost=2, memory_cost=65536 (64MB), parallelism=2 (OWASP minimums)
-- **JWT verification:** RS256 asymmetric signing, public key can verify without exposing private key
-- **Token blacklist:** Redis `db=1` stores blacklisted JTI tokens with TTL = token remaining lifetime
-- **PII encryption:** BVN, NIN, phone numbers encrypted at rest using Fernet (AES-128-CBC)
-- **Webhook verification:** Squad webhooks must carry valid HMAC-SHA512 signature
-- **CORS:** Strict allowlist (no `*` in production) — only specific origins allowed
-- **Security headers:** Nginx enforces HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy
-
----
-
-### Database Design
-
-#### Key Tables
-
-**users** — Core user records
-- `id` (UUID, PK)
-- `phone` (unique, indexed for login)
-- `phone_verified` (boolean)
-- `role` (enum: trader, job_seeker, both, lender)
-- `squad_account_id`, `squad_account_number` (Squad virtual account)
-- `phone_encrypted`, `bvn_encrypted` (Fernet-encrypted PII)
-- `location_lat`, `location_lng` (indexed for geospatial queries)
-- Timestamps: `created_at`, `updated_at`
-
-**refresh_tokens** — Session management
-- `id` (UUID, PK)
-- `user_id` (FK → users)
-- `token_hash` (SHA256 of opaque token, indexed, unique)
-- `family_id` (UUID for family-based rotation)
-- `device_fingerprint` (optional device tracking)
-- `expires_at`, `used_at`, `revoked` (boolean)
-
-**seeker_profiles** — Job seekers with embeddings
-- `user_id` (UUID, PK/FK → users)
-- `skills` (ARRAY of text)
-- `availability` (enum: fulltime, parttime, gigs)
-- `completion_rate`, `reputation_score` (float)
-- `voice_transcript` (text)
-- `embedding` (Vector 1024-dim) — Cohere multilingual-v3, indexed with IVFFlat cosine similarity
-
-**credit_scores** — Pulse Score
-- `user_id` (UUID, PK/FK → users)
-- `score` (0–850 range)
-- `tier` (enum: none, bronze, silver, gold, platinum)
-- `breakdown` (JSONB of signal weights)
-- `microloan_limit`, `savings_eligible`, `insurance_eligible`
-- `last_calculated_at` (timestamp)
-
-**credit_score_history** — Audit trail (separate table — don't inflate main row)
-- `id`, `user_id`, `score`, `tier`, `recorded_at`
-
-**transactions** — Squad transactions (HIGH-VOLUME, PARTITIONED by month)
-- Partitioned range on `created_at` (each month in separate partition)
-- `id` (UUID, PK)
-- `user_id` (FK → users, indexed with created_at for paginated feed)
-- `squad_tx_id` (external reference, unique, indexed)
-- `type` (enum: transfer, payment, refund — validated at app layer)
-- `amount` (BIGINT — stored in **KOBO**, never naira floats)
-- `counterparty`, `metadata` (JSONB)
-- Indexes: `(user_id, created_at DESC)` covers paginated queries, `(squad_tx_id)` for idempotency checks
-
-**Important:** Amounts stored as **KOBO** (lowest unit, integer):
-- 45000 kobo = ₦450.00
-- Prevents floating-point rounding bugs in financial calculations
-
-#### Row Level Security (RLS)
-
-- Enabled on all user-data tables
-- Users see only their own data
-- Service role (backend) bypasses RLS
-- Lenders see only anonymised + explicitly unlocked profiles
-
-#### Key Indexes
-
-| Table | Index | Purpose |
-|-------|-------|---------|
-| users | `phone` (unique) | O(1) login lookup |
-| users | `(location_lat, location_lng)` | Geospatial matching |
-| transactions | `(user_id, created_at DESC)` | Paginated feed query covers |
-| seeker_profiles | `embedding (ivfflat cosine)` | ANN search for job matches |
-| job_listings | `embedding (ivfflat cosine)` | ANN search |
-| refresh_tokens | `token_hash` | O(1) token validation |
-| credit_score_history | `(user_id, recorded_at)` | 6-month chart queries |
-
----
-
-### API Design
-
-#### Response Envelope (Consistent across all routes)
-
-Success:
-```json
-{
-  "ok": true,
-  "data": { /* payload */ },
-  "meta": { "page": 1, "total": 47 }  // only for paginated lists
-}
-```
-
-Error:
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "INSUFFICIENT_PULSE_SCORE",  // machine-readable
-    "message": "Score 287 below 400 required",
-    "field": null  // populated for validation errors
-  },
-  "request_id": "a3b2c1..."
-}
-```
-
-Pagination (cursor-based, scales to millions):
-```json
-{
-  "ok": true,
-  "data": [...],
-  "meta": {
-    "cursor": "eyJpZCI6...",  // base64-encoded cursor
-    "has_more": true,
-    "count": 20
-  }
-}
-```
-
-#### Core Routes
-
-**Auth:**
-- `POST /api/v1/auth/otp/send` — Send OTP to phone (rate limited 5/min)
-- `POST /api/v1/auth/register` — OTP → create user → provision Squad account → issue tokens
-- `POST /api/v1/auth/login` — Phone + OTP → JWT pair
-- `POST /api/v1/auth/refresh` — Rotate refresh token → new pair
-- `POST /api/v1/auth/logout` — Blacklist JWT, delete refresh token
-
-**Onboarding:**
-- `POST /api/v1/onboard/voice` — Audio upload → Whisper → Claude extraction → return JSON
-- `POST /api/v1/onboard/confirm` — Save profile → queue embedding → mark complete
-- `POST /api/v1/onboard/manual` — Text fallback
-
-**Credit:**
-- `GET /api/v1/credit/{user_id}` — Score + breakdown (Redis 5min cache)
-- `GET /api/v1/credit/{user_id}/history` — Last 6 months
-
-**Jobs:**
-- `GET /api/v1/matches/{user_id}` — Top 5 via pgvector (10min cache)
-- `POST /api/v1/listings` — Create → queue embedding → notify seekers
-- `POST /api/v1/listings/{id}/apply` — Apply → notify employer
-- `PATCH /api/v1/applications/{id}/complete` — Mark done → Squad payout → credit recalc
-
-**Webhooks:**
-- `POST /api/v1/webhooks/squad` — IP-restricted, signature verified, queued to Celery `critical`
-
----
-
-## Services & Workers
-
-### Credit Score Service (Most Critical)
-
-**Pulse Score:** 0–850 across 6 weighted signals
-
-```python
-WEIGHTS = {
-    "tx_frequency":    0.25,  # transaction velocity
-    "tx_growth":       0.15,  # trend over 90 days
-    "ajo_on_time":     0.25,  # group savings reliability
-    "gig_completion":  0.15,  # job completion rate
-    "repayment":       0.10,  # loan payback history
-    "network_density": 0.10,  # circle of trust
-}
-```
-
-**Triggered by:**
-- Squad webhook (async via Celery)
-- Manual admin recalculation
-- Celery scheduled tasks (periodic refresh)
-
-**Output:**
-- Score + tier written to `credit_scores` table
-- History entry appended to `credit_score_history`
-- Redis cache invalidated
-- Supabase Realtime broadcast to connected clients
-
-### Fraud Detection Service
-
-Non-blocking — runs as Celery low-priority task, never in request path.
-
-**Flags checked:**
-- Rapid job posting (>5 jobs/hour)
-- Circular payments (same amount 3+ times)
-- Score jump (>150 points in 24h)
-- Device duplication
-- Account age check
-
-**Actions:**
-- Soft freeze payouts (no auto-ban — human review)
-- Alert support team
-- Flag stored in `fraud_flags` table for investigation
-
-### Background Job Queues
-
-**3 Priority Queues:**
-
-| Queue | Max Retries | Timeout | Tasks |
-|-------|------------|---------|-------|
-| `critical` | 2 | 30s | Squad webhooks, payouts, OTP, fraud soft-freeze |
-| `default` | 3 | 60s | Credit recalc, cache invalidation, notifications, referral checks |
-| `low` | 5 | 120s | Embeddings, fraud evaluation, analytics, reports |
-
-**Example Task:**
-```python
-@celery_app.task(
-    queue="default",
-    max_retries=3,
-    autoretry_for=(Exception,),
-    retry_backoff=True,  # exponential: 60s, 120s, 240s
-    retry_backoff_max=600
-)
-def recalculate_credit_score(user_id: str):
-    # Called after every Squad webhook
-    pass
-```
-
-**The Squad Webhook → Credit Pipeline:**
-```
-Squad fires webhook
-→ HMAC verify
-→ Idempotency check (Redis)
-→ Celery critical queue
-→ Write transaction
-→ Celery default queue
-→ Credit recalculation
-→ Supabase Realtime broadcast to FE
-```
-
-HTTP response returns **200 OK immediately** — Squad doesn't wait for recalc.
-
----
-
-### Caching Strategy
-
-**Redis Database Allocation:**
-
-| DB | Purpose | Patterns | TTL |
-|----|---------|----------|-----|
-| 0 | App cache | `credit:{uid}`, `matches:{uid}` | 5–60 min, invalidate on write |
-| 1 | Token blacklist + rate limits | `blacklist:{jti}`, `rl:{ip}:{route}`, `otp:{phone}` | = token lifetime |
-| 2 | Celery broker | Managed by Celery | Celery manages |
-| 3 | Sessions + device FP | `device:{fp}`, `session:{uid}` | 7 days |
-
-**Cache-Aside Pattern:**
-```python
-# Try cache → miss → DB → populate cache → return
-cached = await redis.get(f"credit:{user_id}")
-if cached:
-    return CreditScore.model_validate_json(cached)
-
-score = await db.get_credit(user_id)
-await redis.setex(f"credit:{user_id}", 300, score.model_dump_json())
-return score
-```
-
-**OTP Storage (Secure):**
-- Never stored in plain text
-- Hashed with SHA256 before storing in Redis
-- 5-minute TTL
-- Single-use (deleted on successful verification)
-
----
-
-### Squad Integration
-
-**Every money movement goes through Squad.**
-
-#### Key Operations
-
-| Trigger | Squad Call | Queue | Result |
-|---------|-----------|-------|--------|
-| User registers | Create Virtual Account | critical | squad_account_number on user |
-| Job marked complete | Transfer to seeker | critical | transaction record → credit signal |
-| Loan approved | Transfer to borrower | critical | loan_disbursement tx |
-| Ajo payout date | Transfer to recipient | critical | ajo_payout tx |
-| Referral bonus | Transfer ₦500 | default | referral_payout tx |
-| Squad fires webhook | Receive + verify | → critical Celery | transaction record |
-
-#### Amount Storage
-
-**ALWAYS store in KOBO (lowest unit):**
-```python
-# 45000 kobo = ₦450.00
-amount_kobo: int = 45000
-amount_naira = amount_kobo / 100  # Only for display
-```
-
-#### Idempotency
-
-Prevent duplicate processing via Redis atomic check-and-set:
-```python
-lock_key = f"webhook:processed:{squad_tx_id}"
-already_processed = await redis.set(lock_key, "1", nx=True, ex=86400)
-if not already_processed:
-    return  # duplicate — silently ignore
+curl http://localhost:4000/health   # → {"status":"ok","environment":"development"}
 ```
 
 ---
 
-### AI / ML Pipeline
+## 6. Run the Frontend
 
-#### Voice Onboarding
+In a new terminal, from the repo root:
 
-```
-Audio (WebM/WAV, <10MB)
-→ Whisper transcription (multilingual)
-→ Claude NLP extraction (structured JSON)
-→ User review & confirm
-→ DB save + queue embedding generation
-```
-
-**Supported Languages:** Yoruba, Igbo, Hausa, Pidgin, English
-
-#### Embedding Generation (Cohere multilingual-v3)
-
-- 1024-dim vectors
-- Supports all Zovu languages
-- Indexed with IVFFlat for cosine similarity search
-- Queued to Celery `low` priority (5 retries, 120s timeout)
-
-#### Financial AI Assistant
-
-- Stateless conversation (full history sent each turn)
-- Context-aware (user's score, tier, language)
-- Rate limited: 20 messages/hour/user
-- Encourages financial literacy, never gives specific investment advice
-
----
-
-## Deployment
-
-### Production Checklist
-
-- [ ] All env vars validated at startup (app refuses to start with missing config)
-- [ ] `DEBUG=False` in production (disables `/docs`, `/redoc`)
-- [ ] pgvector extension enabled: `CREATE EXTENSION IF NOT EXISTS vector;`
-- [ ] Alembic migrations run on startup: `alembic upgrade head` in entrypoint
-- [ ] Redis TLS (`rediss://`) + password set
-- [ ] Squad webhook IP whitelisted in Nginx
-- [ ] Sentry DSN configured
-- [ ] HTTPS only (HTTP → HTTPS redirect at Nginx)
-- [ ] Database backups scheduled (Supabase + manual `pg_dump` weekly)
-- [ ] Flower UI protected with basic auth (not public)
-
-### Docker Services
-
-```yaml
-api:
-  command: uvicorn src.main:app --host 0.0.0.0 --port 4000 --workers 4
-
-worker-critical:
-  command: celery -A src.workers.celery_app worker -Q critical -c 4
-
-worker-default:
-  command: celery -A src.workers.celery_app worker -Q default -c 4
-
-worker-low:
-  command: celery -A src.workers.celery_app worker -Q low -c 2
-
-flower:
-  command: celery flower --broker=<REDIS_URL>
-
-postgres:
-  image: pgvector/pgvector:pg15
-
-redis:
-  image: redis:7-alpine
-```
-
----
-
-## Key Libraries (requirements.txt)
-
-```
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-sqlalchemy==2.0.30
-asyncpg==0.29.0
-alembic==1.13.1
-pydantic==2.7.1
-pydantic-settings==2.2.1
-redis[asyncio]==5.0.4
-celery==5.4.0
-argon2-cffi==23.1.0
-python-jose[cryptography]==3.3.0
-httpx==0.27.0
-tenacity==8.2.3
-pgvector==0.2.5
-slowapi==0.1.9
-structlog==24.1.0
-sentry-sdk[fastapi]==2.3.0
-cryptography==42.0.5
-flower==2.0.1
-```
-
----
-
-## Backend LLD Summary
-
-The backend is production-grade from day 1:
-- **Async-first:** Every network call, DB query, and job processing is async — no blocking operations
-- **Secure:** Argon2id + RS256 JWT with family-based token rotation, PII encryption, HMAC webhook verification
-- **Scalable:** Partitioned transactions table, Redis caching, 3-tier Celery queues, async connection pooling
-- **Observable:** Structured JSON logging, Sentry error tracking, Prometheus metrics
-- **Squad-native:** Every money movement verified and tracked, idempotency built-in, webhook processing in Celery
-
-See above sections for detailed documentation on architecture, database design, API contracts, authentication, services, and deployment.
-
----
-
-## Environment Variables — Where to Get Them
-
-| Variable | Where to get it |
-|----------|----------------|
-| `SQUAD_SECRET_KEY` | [Squad Sandbox Dashboard](https://sandbox.squadco.com) → Merchant Settings → API & Webhook tab |
-| `SQUAD_BASE_URL` | Use `https://sandbox-api-d.squadco.com` for dev. Switch to `https://api-d.squadco.com` for production |
-| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) — used for Whisper voice transcription |
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) — used for Claude NLP profile extraction |
-| `COHERE_API_KEY` | [dashboard.cohere.com](https://dashboard.cohere.com) — used for multilingual embeddings |
-| `DATABASE_URL` | Your local PostgreSQL connection string (backend) |
-| `SECRET_KEY` | Any random string — used to sign JWTs. Run `openssl rand -hex 32` to generate one |
-
-> **Never commit `.env` or `.env.local` to GitHub.** They are already in `.gitignore`.
-
----
-
-## Running Both Frontend & Backend at the Same Time
-
-Open two terminals:
-
-**Terminal 1 — Frontend:**
 ```bash
-cd frontend && npm run dev
+cd frontend
+npm install
+npm run dev
 ```
 
-**Terminal 2 — Backend:**
+Vite serves the app on [http://localhost:5173](http://localhost:5173) and
+proxies `/api/*` to the backend on `:4000` (configured in
+`frontend/vite.config.ts`). Other available scripts in `frontend/package.json`:
+
+| Script             | What it does                                      |
+|--------------------|---------------------------------------------------|
+| `npm run dev`      | Start the Vite dev server on `:5173`              |
+| `npm run build`    | Type-check (`tsc -b`) and produce a `dist/` build |
+| `npm run preview`  | Serve the production build locally                |
+| `npm run lint`     | Run ESLint over `frontend/`                       |
+
+Sign in with the seeded admin:
+
+- Email: `admin@zovu.co`
+- Password: `ZovuAdmin2026!`
+
+Or register a new trader/job-seeker through the onboarding flow.
+
+---
+
+## 7. API Docs
+
+FastAPI auto-generates interactive docs:
+
+- Swagger UI: [http://localhost:4000/docs](http://localhost:4000/docs)
+- ReDoc:      [http://localhost:4000/redoc](http://localhost:4000/redoc)
+- Health:     [http://localhost:4000/health](http://localhost:4000/health)
+- Ready:      [http://localhost:4000/ready](http://localhost:4000/ready)
+- Metrics:    [http://localhost:4000/metrics](http://localhost:4000/metrics) (Prometheus format)
+
+All business endpoints live under the `/api/v1/` prefix (see
+`backend/src/main.py` for the full router list: auth, users, credit, gigs,
+applications, lenders, job_seekers, loans, transactions, ajo, referral,
+webhooks, admin, reviews).
+
+---
+
+## 8. Demo Walkthrough
+
+A six-step happy path that exercises the whole stack — useful for a hackathon
+demo or a smoke test after pulling new changes.
+
+1. **Register a trader.** Open `http://localhost:5173`, choose "I sell goods or
+   services", complete onboarding (voice or manual). On submit, the backend
+   provisions a Squad virtual account and seeds the user's Pulse Score row.
+2. **Register a job seeker.** In a second browser profile, sign up as a
+   seeker. The Celery `low` queue generates a Cohere embedding from the voice
+   transcript / skills list.
+3. **Post a gig.** As the trader, post a job with skills + price. The backer
+   embeds the listing and the matching service ranks seekers via pgvector
+   cosine similarity.
+4. **Apply and accept.** The seeker sees the gig in their matches feed,
+   applies, the trader accepts → escrow state machine moves to `funded`.
+5. **Simulate Squad payment.** Fund the trader's virtual account via the
+   sandbox simulator (see Squad section below). The webhook hits
+   `POST /api/v1/webhooks/squad`, HMAC is verified, the transaction is
+   persisted, and the Pulse Score recalc fires asynchronously.
+6. **Mark complete.** The trader marks the gig done → Squad transfer to the
+   seeker → both Pulse Scores recalculate → the seeker sees the payment in
+   `Transactions` and the new score reflected on the dashboard.
+
+---
+
+## 9. Squad API Integration Points
+
+Every money movement and identity event in ZOVU is mediated by Squad. The
+queue column shows which Celery queue handles the call.
+
+| Trigger                          | Squad Feature                          | When / Queue                                                                 |
+|----------------------------------|----------------------------------------|------------------------------------------------------------------------------|
+| User registers                   | Create Virtual Account                 | Sync on `/auth/register`, persists `squad_account_number` on the user        |
+| Trader funds escrow              | Virtual Account credit (webhook)       | Squad → `POST /api/v1/webhooks/squad` → `critical` queue                     |
+| Gig marked complete              | Transfer (trader → seeker)             | `critical` queue, then Pulse Score recalc on `default` queue                 |
+| Loan approved                    | Transfer (lender float → borrower)     | `critical` queue, writes a `loan_disbursement` transaction                   |
+| Ajo payout day                   | Transfer (merchant acct → recipient)   | Celery beat scheduled task → `critical` queue                                |
+| Referral bonus                   | Transfer (₦500 default)                | `default` queue, idempotent via Redis lock                                   |
+| Any Squad webhook                | HMAC-SHA512 verify + idempotency       | Verified in `routers/webhooks.py`, queued to `critical`, returns 200 fast    |
+
+Sandbox testing — fire a credit into a virtual account:
+
 ```bash
-cd backend && source venv/bin/activate && uvicorn src.main:app --reload
+curl -X POST https://sandbox-api-d.squadco.com/virtual-account/simulate/payment \
+  -H "Authorization: Bearer $SQUAD_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"virtual_account_number":"<your-test-VA>","amount":"5000"}'
 ```
+
+That triggers the full webhook → transaction → Pulse Score recalc loop.
 
 ---
 
-## Shared Types
+## 10. Running Tests
 
-The `types/` folder at the root contains all shared TypeScript interfaces used by the FE. BE mirrors these as Pydantic models.
+An automated test suite is **not yet in this repo**. For now the smoke tests
+are:
 
-**FE imports types like this:**
-```typescript
-import type { User, CreditScore, JobMatch } from '../../types'
+```bash
+# Backend smoke test — exercises auth + core endpoints
+pwsh backend/test-api.ps1            # Windows / PowerShell
+# (port from this script to bash if you are on macOS/Linux)
+
+# Frontend type-check + production build (fails on any TS error)
+cd frontend && npm run build
+
+# Frontend lint
+cd frontend && npm run lint
 ```
 
-**Rule:** If a type shape changes, announce it in the group chat **before** pushing. Both FE and BE will break silently otherwise.
+Adding `pytest` to `backend/` and `vitest` to `frontend/` is tracked as a
+follow-up. Until then, the demo walkthrough in section 8 is the canonical
+end-to-end check.
 
 ---
 
-## Squad API — Sandbox Testing
+## 11. Team
 
-1. Create a sandbox account at [sandbox.squadco.com](https://sandbox.squadco.com)
-2. Get your secret key from Merchant Settings → API & Webhook tab
-3. Use the simulate payment endpoint to test virtual account funding:
+Add team members here.
 
-```
-POST https://sandbox-api-d.squadco.com/virtual-account/simulate/payment
-```
-
-```json
-{
-  "virtual_account_number": "your-test-account-number",
-  "amount": "5000"
-}
-```
-
-This will fire the webhook and trigger the full transaction → Pulse Score recalculation loop.
+- _Name_ — _role_ — _GitHub handle_
+- _Name_ — _role_ — _GitHub handle_
 
 ---
 
-## Team Rules
+## Troubleshooting
 
-- **FE** touches `FE/` only
-- **BE** touches `BE/` only
-- **DA** writes to `BE/` seed data scripts only
-- **Nobody** edits another person's folder
-- Any change to `types/` → announce in group chat first
-- BE must have stub endpoints live by **end of Day 2**
-- FE uses mock data until stubs are live — never block on BE
-- One full demo dry-run on **Day 3 evening**
-- **Day 4 is polish only** — no new features
+| Symptom                                                           | Fix                                                                                                          |
+|-------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| `Redis is required for authentication and sessions` at startup    | Start Redis (`docker compose up -d redis` in `backend/`) and check `REDIS_URL`.                              |
+| `FIELD_ENCRYPTION_KEY is required in production`                  | Set `ENVIRONMENT=development` in `.env`, or generate a Fernet key (see the comment in `.env.example`).       |
+| Pydantic startup error about missing `JWT_PRIVATE_KEY`            | Generate the RS256 keypair with the openssl commands in section 2 and paste both PEMs into `.env`.           |
+| `no such table: users` on the worker                              | The API and worker must point at the same DB. In Docker this is handled by the shared `zovu_sqlite` volume.  |
+| CSV seeder logs `FileNotFoundError`                               | Set `CSV_DATA_DIR` in `.env` to an absolute path that resolves to `AI-engineer/data`.                        |
+| Frontend can't reach the API                                      | Confirm the API is on `:4000` (`curl http://localhost:4000/health`) — Vite proxies `/api/*` there.           |
 
 ---
 
-## Stuck?
+## License
 
-Mock it and keep moving. Never wait on another team member.
-
-The only exception: if a type in `types/` is wrong or missing, fix it together immediately — it blocks everyone.
+Proprietary. All rights reserved during the hackathon period.

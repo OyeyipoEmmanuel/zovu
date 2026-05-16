@@ -336,6 +336,15 @@ async def _handle_va_funding(db, payload: dict, webhook_id: str) -> dict:
         tx_id=tx.id,
         amount_kobo=amount_kobo,
     )
+
+    # Per-transaction email receipt — receiver is the user who was credited.
+    # Wrap in try/except so an SMTP/SendGrid outage cannot fail the webhook.
+    try:
+        from src.services.email_service import EmailService
+        await EmailService().send_receipt(user.id, tx.id, db)
+    except Exception as e:
+        logger.error("email_receipt_failed", transaction_id=str(tx.id), error=str(e))
+
     return {"tx_id": tx.id, "user_id": user.id, "amount_kobo": amount_kobo}
 
 
@@ -448,6 +457,18 @@ async def _handle_payout_result(db, payload: dict, webhook_id: str, success: boo
         success=success,
         ajo_reconciled=bool(ajo_reconciled),
     )
+
+    # Per-transaction email receipt — only for successful payouts. The party
+    # whose balance changed is the sender (they paid out). Failed transfers
+    # MUST NOT generate a receipt. Wrap so an email outage never derails the
+    # webhook flow.
+    if success and tx.sender_id:
+        try:
+            from src.services.email_service import EmailService
+            await EmailService().send_receipt(tx.sender_id, tx.id, db)
+        except Exception as e:
+            logger.error("email_receipt_failed", transaction_id=str(tx.id), error=str(e))
+
     return {"tx_id": tx.id, "status": new_status, "ajo": ajo_reconciled}
 
 

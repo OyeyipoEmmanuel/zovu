@@ -24,7 +24,16 @@ def display_name(first_name: str, last_name: str) -> str:
 
 
 def get_pulse_tier(score: int) -> str:
-    """Map pulse score (0-850) to tier name."""
+    """Map pulse score (0-850) to tier name.
+
+    Tiers (matches the seeker/trader UI badges):
+        0-399   → Bronze
+        400-699 → Silver
+        700-799 → Gold
+        800+    → Platinum
+    """
+    if score >= 800:
+        return "Platinum"
     if score >= 700:
         return "Gold"
     if score >= 400:

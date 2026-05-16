@@ -89,6 +89,12 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Task 9 — geolocation phone reveal threshold (kilometres).
+    # When the seeker's reported GPS is within this distance of the trader's
+    # stored GPS, the trader's decrypted phone is appended to the application
+    # `note` on hire so the seeker can call them.
+    GEOLOCATION_PHONE_REVEAL_KM: float = 2.0
+
     # Default admin (created idempotently by the seeder on startup)
     ADMIN_EMAIL: str = "admin@zovu.co"
     ADMIN_PASSWORD: str = "ZovuAdmin2026!"

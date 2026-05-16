@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { jobSeekerAPI } from '../../../lib/api';
+import { jobSeekerAPI, markWorkerDone, type ApplicationRecord } from '../../../lib/api';
 import type { GigRecord } from '../../../lib/mockData';
+import { EscrowStatusPill, Countdown } from '../../shared/EscrowStatusPill';
+import { CheckCircle2, Clock, Phone } from 'lucide-react';
 
 const formatDate = (dateStr: string) => {
   const d = new Date(dateStr);
@@ -13,8 +15,22 @@ const renderStars = (rating: number) => {
   ));
 };
 
+/**
+ * Pulls a tel: phone number out of an application note. Task 9 appends
+ * `\nContact trader: {phone}` when the seeker hires within range; if the
+ * marker is absent (or distance > threshold) we just don't render the button.
+ */
+const extractTraderPhone = (note: string | null): string | null => {
+  if (!note) return null;
+  const match = /Contact trader:\s*([+\d][\d\s()-]+)/i.exec(note);
+  return match ? match[1].trim() : null;
+};
+
 export const JobSeekerGigHistory: React.FC = () => {
   const [gigs, setGigs] = useState<GigRecord[]>([]);
+  const [activeApps, setActiveApps] = useState<ApplicationRecord[]>([]);
+  const [busyAppId, setBusyAppId] = useState<string | null>(null);
+  const [activeError, setActiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
@@ -23,8 +39,12 @@ export const JobSeekerGigHistory: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await jobSeekerAPI.getGigHistory(filter === 'all' ? undefined : filter);
+      const [data, active] = await Promise.all([
+        jobSeekerAPI.getGigHistory(filter === 'all' ? undefined : filter),
+        jobSeekerAPI.getActiveApplications().catch(() => [] as ApplicationRecord[]),
+      ]);
       setGigs(data);
+      setActiveApps(active);
     } catch {
       setError('Failed to load gig history');
     } finally {
@@ -33,6 +53,19 @@ export const JobSeekerGigHistory: React.FC = () => {
   };
 
   useEffect(() => { loadData(); }, [filter]);
+
+  const handleMarkDone = async (app: ApplicationRecord) => {
+    setBusyAppId(app.id);
+    setActiveError(null);
+    try {
+      await markWorkerDone(app.id);
+      await loadData();
+    } catch (e) {
+      setActiveError((e as Error).message || 'Could not mark as done. Please retry.');
+    } finally {
+      setBusyAppId(null);
+    }
+  };
 
   const completedGigs = gigs.filter(g => g.status === 'completed');
   const onTimeCount = completedGigs.filter(g => g.rating && g.rating >= 4).length;
@@ -57,6 +90,72 @@ export const JobSeekerGigHistory: React.FC = () => {
           <span className="font-syne text-[28px] font-bold text-[#1A6B4A]">₦{totalEarned.toLocaleString('en-NG')}</span>
         </div>
       </div>
+
+      {/* Active Applications (escrow state machine + Task 9 Call Trader) */}
+      {activeApps.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <h2 className="font-syne text-[18px] font-bold text-zovu-text-light">Active Applications</h2>
+          {activeError && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-[8px] p-3 font-dm text-[13px] text-red-300">
+              {activeError}
+            </div>
+          )}
+          <div className="flex flex-col gap-3">
+            {activeApps.map((app) => {
+              const traderPhone = extractTraderPhone(app.note);
+              return (
+                <article
+                  key={app.id}
+                  className="bg-zovu-surface-1 border border-zovu-border rounded-[16px] p-5 flex flex-col gap-3"
+                >
+                  <div className="flex flex-wrap justify-between items-start gap-3">
+                    <div>
+                      <p className="font-dm text-[12px] text-zovu-text uppercase tracking-wider">Application</p>
+                      <p className="font-dm text-[13px] text-zovu-text-light mt-1">
+                        Applied {formatDate(app.applied_at)}
+                      </p>
+                    </div>
+                    <EscrowStatusPill status={app.status} />
+                  </div>
+
+                  {app.confirmation_deadline_at && app.status === 'worker_done' && (
+                    <div className="flex items-center gap-2 font-dm text-[12px] text-zovu-text">
+                      <Clock size={12} />
+                      <span>Trader has</span>
+                      <Countdown deadline={app.confirmation_deadline_at} />
+                      <span>to confirm</span>
+                    </div>
+                  )}
+
+                  {/* Task 9 — phone is only present if the seeker hired within
+                      the geolocation threshold. If absent, no button renders. */}
+                  {traderPhone && (
+                    <a
+                      href={`tel:${traderPhone}`}
+                      className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-[8px] bg-[#1A6B4A] hover:brightness-110 text-white font-dm text-[13px] font-medium transition-all"
+                    >
+                      <Phone size={14} />
+                      Call Trader · {traderPhone}
+                    </a>
+                  )}
+
+                  {app.status === 'waiting_for_worker' && (
+                    <button
+                      type="button"
+                      onClick={() => handleMarkDone(app)}
+                      disabled={busyAppId === app.id}
+                      className="inline-flex items-center gap-2 self-start px-4 py-2 rounded-[8px] bg-[#F4A11D]/10 hover:bg-[#F4A11D]/20 text-[#F4A11D] font-dm text-[13px] font-medium border border-[#F4A11D]/30 transition-all disabled:opacity-50"
+                    >
+                      <CheckCircle2 size={14} />
+                      {busyAppId === app.id ? 'Submitting…' : 'Mark as done'}
+                    </button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex border-b border-zovu-border">
