@@ -227,6 +227,7 @@ class LoanService:
             loan_id=loan_id,
             transaction_type=TransactionType.LOAN_DISBURSEMENT,
             amount=loan.principal_amount,
+            direction="credit",   # money arrives for the borrower
             squad_reference=squad_transaction_id,
             status="completed",
             tx_metadata={"loan_tenure_days": loan.tenure_days},
@@ -288,6 +289,7 @@ class LoanService:
             loan_id=loan_id,
             transaction_type=TransactionType.LOAN_REPAYMENT,
             amount=amount,
+            direction="debit",    # money leaves the borrower
             squad_reference=squad_reference,
             status="completed",
             tx_metadata={

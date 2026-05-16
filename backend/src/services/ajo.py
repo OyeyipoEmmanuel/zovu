@@ -206,22 +206,33 @@ class AjoService:
         result = await self.db.execute(query)
         ajo = result.scalar_one_or_none()
         
-        # Update contribution
+        # Get contributing user to update their personal ajo_savings_balance
+        query = select(User).where(User.id == membership.user_id)
+        result = await self.db.execute(query)
+        user = result.scalar_one_or_none()
+        
+        # Update contribution totals
         membership.total_contributed += amount
         ajo.total_balance += amount
         
+        # FIX: Update the user's personal ajo_savings_balance field
+        if user:
+            user.ajo_savings_balance = (user.ajo_savings_balance or 0) + amount
+        
         # Create transaction record
-        # Contribution: member (sender) → ajo pool (receiver=None)
+        # FIX: Added required `direction` field — contribution is a debit (money leaving member)
         transaction = Transaction(
             sender_id=membership.user_id,
             receiver_id=None,
             transaction_type=TransactionType.AJO_CONTRIBUTION,
             amount=amount,
+            direction="debit",   # money leaves the contributing member's wallet
             status="completed",
             tx_metadata={
                 "ajo_id": ajo.id,
                 "ajo_name": ajo.name,
                 "contribution_frequency": ajo.contribution_frequency,
+                "membership_id": membership_id,
             },
         )
         self.db.add(transaction)
@@ -239,15 +250,23 @@ class AjoService:
             "amount_contributed": amount,
             "total_contributed": membership.total_contributed,
             "group_balance": ajo.total_balance,
+            "status": "completed",
         }
     
-    async def distribute_payout(self, ajo_id: str, member_index: int) -> dict:
+    async def distribute_payout(
+        self,
+        ajo_id: str,
+        member_index: int,
+        squad_service=None,
+    ) -> dict:
         """
         Distribute payout to member at their turn in rotation.
+        Initiates a real Squad transfer if squad_service is provided.
         
         Args:
             ajo_id: Ajo group ID
             member_index: Member's position in payout order
+            squad_service: Optional SquadService instance for real money movement
             
         Returns:
             dict with payout details
@@ -268,6 +287,9 @@ class AjoService:
         # Calculate total payout (sum of all contributions in group)
         payout_amount = ajo.total_balance
         
+        if payout_amount <= 0:
+            raise ValidationError("No funds available for payout")
+        
         # Get member receiving payout
         query = select(AjoMembership).where(
             AjoMembership.ajo_id == ajo_id,
@@ -279,23 +301,80 @@ class AjoService:
         if not membership:
             raise NotFoundError("Member not found for payout")
         
-        # Update membership
-        membership.total_received += payout_amount
+        # Get receiving user for their Squad account number
+        query = select(User).where(User.id == membership.user_id)
+        result = await self.db.execute(query)
+        recipient_user = result.scalar_one_or_none()
         
-        # Reduce group balance
+        # Generate a unique reference for this payout
+        payout_ref = f"ajo-payout-{uuid.uuid4().hex}"
+        
+        # Default status — will be upgraded if Squad transfer succeeds
+        payout_status = "pending"
+        squad_transfer_result = None
+        
+        # Attempt real Squad transfer if service provided and user has a VA number
+        if squad_service and recipient_user and recipient_user.squad_account_number:
+            try:
+                squad_transfer_result = await squad_service.transfer_funds(
+                    recipient_account=recipient_user.squad_account_number,
+                    amount_kobo=payout_amount,
+                    reference=payout_ref,
+                    narration=f"Ajo payout — {ajo.name}",
+                )
+                # If transfer was accepted by Squad (even if still processing), mark as processing
+                payout_status = squad_transfer_result.get("status", "pending")
+                if payout_status in ("success", "successful", "completed"):
+                    payout_status = "completed"
+                logger.info(
+                    "ajo_squad_transfer_initiated",
+                    ajo_id=ajo_id,
+                    user_id=membership.user_id,
+                    reference=payout_ref,
+                    squad_status=payout_status,
+                )
+            except Exception as exc:
+                logger.error(
+                    "ajo_squad_transfer_failed",
+                    ajo_id=ajo_id,
+                    user_id=membership.user_id,
+                    error=str(exc),
+                )
+                # Keep payout_status as "pending" — webhook will complete it
+        else:
+            logger.warning(
+                "ajo_payout_no_squad_service_or_account",
+                ajo_id=ajo_id,
+                user_id=membership.user_id,
+                has_service=squad_service is not None,
+                has_account=bool(recipient_user and recipient_user.squad_account_number),
+            )
+        
+        # Update membership and ajo balance
+        membership.total_received += payout_amount
         ajo.total_balance -= payout_amount
         
+        # Update recipient's ajo_savings_balance to reflect payout deduction
+        if recipient_user:
+            recipient_user.ajo_savings_balance = max(
+                0, (recipient_user.ajo_savings_balance or 0) - payout_amount
+            )
+        
         # Create transaction record
-        # Payout: ajo pool (sender=None) → receiving member
+        # FIX: Added required `direction` field — payout is a credit (money arriving for recipient)
         transaction = Transaction(
             sender_id=None,
             receiver_id=membership.user_id,
             transaction_type=TransactionType.AJO_PAYOUT,
             amount=payout_amount,
-            status="pending",  # Pending until Squad transfer completes
+            direction="credit",   # money arrives for the recipient member
+            squad_reference=payout_ref,
+            status=payout_status,
             tx_metadata={
                 "ajo_id": ajo_id,
+                "ajo_name": ajo.name,
                 "payout_order": member_index,
+                "squad_transfer": squad_transfer_result,
             },
         )
         self.db.add(transaction)
@@ -306,14 +385,20 @@ class AjoService:
             ajo_id=ajo_id,
             user_id=membership.user_id,
             amount=payout_amount,
+            status=payout_status,
         )
         
         return {
             "ajo_id": ajo_id,
             "user_id": membership.user_id,
             "payout_amount": payout_amount,
-            "status": "pending",
-            "message": "Payout initiated, will be transferred shortly",
+            "payout_reference": payout_ref,
+            "status": payout_status,
+            "message": (
+                "Payout completed successfully"
+                if payout_status == "completed"
+                else "Payout initiated — will complete shortly"
+            ),
         }
     
     async def get_ajo_details(self, ajo_id: str) -> dict:

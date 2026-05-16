@@ -71,7 +71,9 @@ export interface PartnerStats {
   customers_served: number;
 }
 
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
+// Default to REAL backend unless mock mode is explicitly enabled.
+// To use mock data, set VITE_USE_MOCK=true in your .env file.
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 const BASE_URL = '/api';
 
@@ -141,9 +143,43 @@ export const fetchTransactions = async (
         : mockTransactions.filter((t) => t.type === filter);
     return { data: filtered, total: filtered.length };
   }
-  return request<{ data: Transaction[]; total: number }>(
-    `/transactions?filter=${filter}&page=${page}&limit=${limit}`
-  );
+  // Backend uses cursor-based pagination: GET /api/v1/transactions?limit=N
+  // The backend returns { items: [...], total: N, cursor: string|null, has_more: bool }
+  // We remap to the { data, total } shape the UI expects.
+  const params = new URLSearchParams({ limit: String(limit) });
+  const raw = await request<{
+    items: Array<{
+      id: string;
+      sender_id: string | null;
+      receiver_id: string | null;
+      transaction_type: string;
+      amount: number;
+      status: string;
+      squad_reference: string | null;
+      created_at: string;
+    }>;
+    total: number;
+    cursor: string | null;
+    has_more: boolean;
+  }>(`/v1/transactions?${params.toString()}`);
+
+  // Map backend Transaction shape → frontend Transaction type
+  const data: Transaction[] = (raw.items ?? []).map((t) => ({
+    id: t.id,
+    type: t.sender_id ? 'outflow' : 'inflow',
+    amount: t.amount,
+    counterparty: t.transaction_type,
+    description: t.transaction_type.replace(/_/g, ' '),
+    timestamp: t.created_at,
+    reference: t.squad_reference ?? t.id,
+    status: t.status,
+  }));
+
+  // Client-side filter when backend doesn't support filter param
+  const filtered =
+    filter === 'all' ? data : data.filter((t) => t.type === filter);
+
+  return { data: filtered, total: filtered.length };
 };
 
 // ─── Pulse Score ───────────────────────────────────────────

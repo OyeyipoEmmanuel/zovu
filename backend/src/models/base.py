@@ -368,7 +368,7 @@ class Transaction(Base):
     amount: Mapped[int] = mapped_column(Integer)  # KOBO
     squad_reference: Mapped[str | None] = mapped_column(String(100))
 
-    direction: Mapped[str] = mapped_column(String(20))  # credit | debit
+    direction: Mapped[str | None] = mapped_column(String(20), nullable=True)  # credit | debit
 
     # Extended fields (added for marketplace/seeder compatibility)
     amount_gross: Mapped[int | None] = mapped_column(Integer)   # KOBO (before fee)

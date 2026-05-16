@@ -59,11 +59,18 @@ class SquadService:
             "email": f"{user.id}@zovu.internal",
             "first_name": display_name,
             "last_name": "Zovu",
-            "mobile_num": "",
-            "bvn": "",
             "is_permanent": True,
             "customer_identifier": str(user.id),
         }
+        # Only include mobile_num / bvn when they are actually available;
+        # Squad rejects requests with empty-string values for these fields.
+        if user.phone and user.phone not in (b"", ""):
+            try:
+                decoded_phone = user.phone.decode() if isinstance(user.phone, bytes) else str(user.phone)
+                if decoded_phone.strip():
+                    payload["mobile_num"] = decoded_phone.strip()
+            except Exception:
+                pass
 
         logger.info("squad_create_va_start", user_id=user.id)
 
@@ -265,36 +272,56 @@ class SquadService:
 
     def verify_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
         """HMAC-SHA512 using SQUAD_SECRET_KEY. Returns True if valid."""
+        # Use hmac.new() correctly — key must be bytes, digestmod is the hashlib algo
         expected = hmac.new(
-            self.secret_key.encode(),
-            payload_bytes,
-            hashlib.sha512,
+            self.secret_key.encode("utf-8"),
+            msg=payload_bytes,
+            digestmod=hashlib.sha512,
         ).hexdigest()
 
-        is_valid = hmac.compare_digest(expected.upper(), signature.upper())
+        try:
+            is_valid = hmac.compare_digest(expected.upper(), signature.upper())
+        except (TypeError, ValueError):
+            is_valid = False
 
         if not is_valid:
-            logger.warning("webhook_signature_invalid")
+            logger.warning(
+                "webhook_signature_invalid",
+                expected_prefix=expected[:10],
+                received_prefix=signature[:10] if signature else "<empty>",
+            )
 
         return is_valid
 
     async def handle_webhook(self, webhook_data: dict) -> dict:
         """
         Handle Squad webhook with Redis idempotency (atomic SET nx=True).
+        Dispatches on event_type to update Transaction records in the DB.
         """
-        webhook_id = webhook_data.get("id") or webhook_data.get("transaction_ref")
-        event_type = webhook_data.get("event") or webhook_data.get("event_type", "unknown")
+        # Squad sends the reference in multiple possible fields
+        webhook_id = (
+            webhook_data.get("transaction_ref")
+            or webhook_data.get("id")
+            or webhook_data.get("data", {}).get("transaction_ref")
+        )
+        event_type = (
+            webhook_data.get("event")
+            or webhook_data.get("event_type")
+            or "unknown"
+        )
 
         if not webhook_id:
-            raise ValidationError("Missing webhook id")
+            raise ValidationError("Missing webhook id / transaction_ref")
 
+        # ── Idempotency: reject re-deliveries ──────────────────────────────
         idempotency_key = f"squad_webhook:{webhook_id}"
-        was_new = await self.redis.set(idempotency_key, "1", nx=True, ex=86400)
+        if self.redis:
+            was_new = await self.redis.set(idempotency_key, "1", nx=True, ex=86400)
+            if not was_new:
+                logger.info("webhook_already_processed", webhook_id=webhook_id)
+                return {"webhook_id": webhook_id, "status": "already_processed"}
 
-        if not was_new:
-            logger.info("webhook_already_processed", webhook_id=webhook_id)
-            return {"webhook_id": webhook_id, "status": "already_processed"}
-
+        # ── Persist the raw event ──────────────────────────────────────────
         webhook_log = SquadWebhookLog(
             webhook_id=webhook_id,
             event_type=event_type,
@@ -302,11 +329,71 @@ class SquadService:
             processed=False,
         )
         self.db.add(webhook_log)
+        await self.db.flush()
+
+        # ── Dispatch on event type to update Transaction status ────────────
+        #
+        # Squad fires events like:
+        #   charge.success / payment.success / transaction.successful
+        #   virtual_account.credit
+        # All indicate that a payment was received and we should mark the
+        # related Transaction as "completed".
+        #
+        event_lower = event_type.lower()
+        is_payment_success = any(
+            keyword in event_lower
+            for keyword in ("success", "credit", "completed", "paid")
+        )
+
+        if is_payment_success:
+            # Try to find the transaction by squad_reference first
+            tx_ref = (
+                webhook_data.get("transaction_ref")
+                or webhook_data.get("data", {}).get("transaction_ref")
+                or webhook_data.get("id")
+            )
+            if tx_ref:
+                await self._complete_transaction_by_reference(tx_ref, webhook_data)
+
+        # Mark webhook as processed
+        webhook_log.processed = True
         await self.db.commit()
 
-        logger.info("webhook_logged", webhook_id=webhook_id, event_type=event_type)
+        logger.info("webhook_processed", webhook_id=webhook_id, event_type=event_type)
+        return {"webhook_id": webhook_id, "status": "processed", "event": event_type}
 
-        return {"webhook_id": webhook_id, "status": "received", "async": True}
+    async def _complete_transaction_by_reference(
+        self, squad_reference: str, webhook_data: dict
+    ) -> None:
+        """
+        Find a pending Transaction by its squad_reference and mark it completed.
+        Also handles virtual-account credit events for Ajo contributions.
+        """
+        from sqlalchemy import select as sa_select
+        from src.models import Transaction
+
+        stmt = sa_select(Transaction).where(
+            Transaction.squad_reference == squad_reference
+        )
+        result = await self.db.execute(stmt)
+        tx = result.scalar_one_or_none()
+
+        if tx and tx.status in ("pending", "processing"):
+            tx.status = "completed"
+            logger.info(
+                "transaction_completed_via_webhook",
+                transaction_id=tx.id,
+                squad_reference=squad_reference,
+                transaction_type=str(tx.transaction_type),
+            )
+        elif not tx:
+            # Could be a new inbound payment (e.g. user sending money to VA)
+            # Log it — the credit_router or background job will pick it up
+            logger.info(
+                "webhook_no_matching_transaction",
+                squad_reference=squad_reference,
+                event_data=webhook_data.get("data", {}),
+            )
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #

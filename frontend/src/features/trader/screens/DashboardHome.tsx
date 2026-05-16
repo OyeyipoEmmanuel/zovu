@@ -42,6 +42,7 @@ export const DashboardHome: React.FC = () => {
   const [profileCompletion, setProfileCompletion] = useState(60);
   const [activeGigCount, setActiveGigCount] = useState(0);
   const [userName, setUserName] = useState('');
+  const [monthlyRevenue, setMonthlyRevenue] = useState(0);
   const didLoad = useRef(false);
 
   const loadData = async (): Promise<void> => {
